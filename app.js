@@ -1087,8 +1087,7 @@ async function copyPrompt(card) {
     await navigator.clipboard.writeText(card.job.prompt);
     flashButton(button, 'copied');
   } catch (_) {
-    els.prompt.value = card.job.prompt;
-    flashButton(button, 'put in prompt box');
+    flashButton(button, "couldn't copy");
   }
 }
 
