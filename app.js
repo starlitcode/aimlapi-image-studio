@@ -48,7 +48,9 @@ const MODELS = [
     name: 'Midjourney',
     note: 'Stylised looks. Upscale and vary results afterwards.',
     family: 'mj',
-    aspectRatios: ['1:1', '4:5', '5:4', '4:3', '2:3', '3:2', '9:16', '16:9', '1:2', '3:1', '4:1'],
+    // Midjourney takes any whole-number ratio; these are shortcuts, "custom" covers the rest
+    aspectRatios: ['1:1', '5:4', '4:3', '3:2', '7:4', '16:9', '21:9', '3:1', '4:1', '4:5', '3:4', '2:3', '9:16', '1:2'],
+    customAspect: true,
     maxRefs: 4,
     maxRefMB: 7,
     refTypes: BASIC_REF_TYPES,
@@ -60,12 +62,25 @@ const GPT_SIZES = [
   ['1024x1024', '1024 × 1024 square'],
   ['1536x1024', '1536 × 1024 landscape'],
   ['1024x1536', '1024 × 1536 portrait'],
-  ['2048x2048', '2048 × 2048 square, 2K'],
+  ['2048x2048', '2048 × 2048 square, 2K (experimental)'],
   ['2048x1152', '2048 × 1152 landscape, 2K'],
   ['1152x2048', '1152 × 2048 portrait, 2K'],
-  ['3840x2160', '3840 × 2160 landscape, 4K'],
-  ['2160x3840', '2160 × 3840 portrait, 4K'],
+  ['3840x2160', '3840 × 2160 landscape, 4K (experimental)'],
+  ['2160x3840', '2160 × 3840 portrait, 4K (experimental)'],
+  ['custom', 'custom size'],
 ];
+
+// GPT Image 2.5 size rules from OpenAI's image guide
+const GPT_EDGE_STEP = 16;
+const GPT_MAX_EDGE = 3840;
+const GPT_MAX_RATIO = 3;
+const GPT_MIN_PIXELS = 655360;
+const GPT_MAX_PIXELS = 8294400;
+const GPT_STABLE_PIXELS = 2560 * 1440;
+
+// Midjourney accepts 1:99 to 99:1, but past 2:1 / 1:2 results get unreliable
+const MJ_MAX_RATIO = 99;
+const MJ_STABLE_RATIO = 2;
 const GPT_QUALITIES = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
 const GPT_BACKGROUNDS = ['auto', 'opaque', 'transparent'];
 const COUNTS = [1, 2, 3, 4];
@@ -97,6 +112,14 @@ const els = {
   modelList: $('#model-list'),
   prompt: $('#prompt'),
   aspectGrid: $('#aspect-grid'),
+  aspectCustom: $('#aspect-custom'),
+  aspectW: $('#aspect-w'),
+  aspectH: $('#aspect-h'),
+  aspectNote: $('#aspect-note'),
+  sizeCustom: $('#size-custom'),
+  sizeW: $('#size-w'),
+  sizeH: $('#size-h'),
+  sizeNote: $('#size-note'),
   resGroup: $('#res-group'),
   size: $('#size'),
   quality: $('#quality'),
@@ -128,6 +151,8 @@ const state = {
   quality: 'auto',
   background: 'auto',
   count: 1,
+  customAspect: { w: 2, h: 1 },
+  customSize: { w: 1280, h: 720 },
   refs: [],
 };
 
@@ -280,8 +305,8 @@ function initKey() {
 /* ---------- preferences (non-sensitive, per device) ---------- */
 
 function savePrefs() {
-  const { modelId, aspect, resolution, size, quality, background, count } = state;
-  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, quality, background, count }));
+  const { modelId, aspect, resolution, size, quality, background, count, customAspect, customSize } = state;
+  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, quality, background, count, customAspect, customSize }));
 }
 
 function loadPrefs() {
@@ -299,6 +324,9 @@ function loadPrefs() {
   if (GPT_QUALITIES.includes(prefs.quality)) state.quality = prefs.quality;
   if (GPT_BACKGROUNDS.includes(prefs.background)) state.background = prefs.background;
   if (COUNTS.includes(prefs.count)) state.count = prefs.count;
+  const pair = (value) => value && Number.isInteger(value.w) && Number.isInteger(value.h) && value.w > 0 && value.h > 0;
+  if (pair(prefs.customAspect)) state.customAspect = { w: prefs.customAspect.w, h: prefs.customAspect.h };
+  if (pair(prefs.customSize)) state.customSize = { w: prefs.customSize.w, h: prefs.customSize.h };
 }
 
 /* ---------- form controls ---------- */
@@ -353,34 +381,125 @@ function ratioParts(ratio) {
   return { w, h };
 }
 
-function renderAspects(model) {
-  if (!model.aspectRatios.includes(state.aspect)) state.aspect = '1:1';
+function setShape(shape, w, h) {
   const box = 26;
-  els.aspectGrid.replaceChildren(
-    ...model.aspectRatios.map((ratio) => {
-      const { w, h } = ratioParts(ratio);
-      const label = document.createElement('label');
-      label.className = 'aspect-option';
-      const shapeWrap = document.createElement('span');
-      shapeWrap.className = 'aspect-shape';
-      const shape = document.createElement('span');
-      const r = w / h;
-      shape.style.setProperty('--w', `${r >= 1 ? box : Math.max(4, box * r)}px`);
-      shape.style.setProperty('--h', `${r >= 1 ? Math.max(4, box / r) : box}px`);
-      shapeWrap.append(shape);
-      const text = document.createElement('span');
-      text.textContent = ratio;
-      label.append(
-        makeRadio('aspect', ratio, ratio === state.aspect, (value) => {
-          state.aspect = value;
-          savePrefs();
-        }),
-        shapeWrap,
-        text,
-      );
-      return label;
-    }),
-  );
+  const r = w / h;
+  shape.style.setProperty('--w', `${r >= 1 ? box : Math.max(4, box * r)}px`);
+  shape.style.setProperty('--h', `${r >= 1 ? Math.max(4, box / r) : box}px`);
+}
+
+function aspectOption(value, text, w, h, onPick) {
+  const label = document.createElement('label');
+  label.className = 'aspect-option';
+  const shapeWrap = document.createElement('span');
+  shapeWrap.className = 'aspect-shape';
+  const shape = document.createElement('span');
+  setShape(shape, w, h);
+  shapeWrap.append(shape);
+  const caption = document.createElement('span');
+  caption.textContent = text;
+  label.append(makeRadio('aspect', value, value === state.aspect, onPick), shapeWrap, caption);
+  return label;
+}
+
+function renderAspects(model) {
+  const allowed = model.customAspect ? [...model.aspectRatios, 'custom'] : model.aspectRatios;
+  if (!allowed.includes(state.aspect)) state.aspect = '1:1';
+  const pick = (value) => {
+    state.aspect = value;
+    savePrefs();
+    updateAspectCustom();
+  };
+  const options = model.aspectRatios.map((ratio) => {
+    const { w, h } = ratioParts(ratio);
+    return aspectOption(ratio, ratio, w, h, pick);
+  });
+  if (model.customAspect) {
+    const { w, h } = state.customAspect;
+    const custom = aspectOption('custom', 'custom', w, h, pick);
+    custom.classList.add('is-custom');
+    options.push(custom);
+  }
+  els.aspectGrid.replaceChildren(...options);
+  els.aspectW.value = String(state.customAspect.w);
+  els.aspectH.value = String(state.customAspect.h);
+  updateAspectCustom();
+}
+
+function wholeNumber(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+const fmt = (n) => n.toLocaleString('en-US');
+
+function checkMjRatio(w, h) {
+  if (!w || !h) return { error: 'Enter two whole numbers, like 7 and 4.' };
+  const r = w / h;
+  if (r > MJ_MAX_RATIO || r < 1 / MJ_MAX_RATIO) return { error: `Midjourney takes ratios from 1:${MJ_MAX_RATIO} to ${MJ_MAX_RATIO}:1.` };
+  if (r > MJ_STABLE_RATIO || r < 1 / MJ_STABLE_RATIO) {
+    return { warning: `Wider than ${MJ_STABLE_RATIO}:1 or taller than 1:${MJ_STABLE_RATIO} can give unpredictable results.` };
+  }
+  return {};
+}
+
+function checkGptSize(w, h) {
+  if (!w || !h) return { error: 'Enter a width and height in pixels.' };
+  if (w % GPT_EDGE_STEP || h % GPT_EDGE_STEP) {
+    const round = (n) => Math.max(GPT_EDGE_STEP, Math.round(n / GPT_EDGE_STEP) * GPT_EDGE_STEP);
+    return { error: `Both sides must be multiples of ${GPT_EDGE_STEP}. Closest: ${round(w)} × ${round(h)}.` };
+  }
+  if (w > GPT_MAX_EDGE || h > GPT_MAX_EDGE) return { error: `Neither side can be over ${fmt(GPT_MAX_EDGE)} pixels.` };
+  if (Math.max(w, h) / Math.min(w, h) > GPT_MAX_RATIO) return { error: `The shape has to stay between 1:${GPT_MAX_RATIO} and ${GPT_MAX_RATIO}:1.` };
+  const pixels = w * h;
+  if (pixels < GPT_MIN_PIXELS) return { error: `${fmt(pixels)} pixels is too small. The minimum is ${fmt(GPT_MIN_PIXELS)}.` };
+  if (pixels > GPT_MAX_PIXELS) return { error: `${fmt(pixels)} pixels is too big. The maximum is ${fmt(GPT_MAX_PIXELS)}.` };
+  if (pixels > GPT_STABLE_PIXELS) return { warning: 'Bigger than 2560 × 1440 is experimental, so results may vary.' };
+  return {};
+}
+
+function showNote(note, result, inputs = []) {
+  note.textContent = result.error || result.warning || '';
+  note.classList.toggle('is-error', Boolean(result.error));
+  note.classList.toggle('is-warn', !result.error && Boolean(result.warning));
+  for (const input of inputs) input.setAttribute('aria-invalid', String(Boolean(result.error)));
+}
+
+// The ratio or size a job will actually send, with "custom" resolved to numbers.
+function resolvedAspect() {
+  return state.aspect === 'custom' ? `${state.customAspect.w}:${state.customAspect.h}` : state.aspect;
+}
+
+function resolvedSize() {
+  return state.size === 'custom' ? `${state.customSize.w}x${state.customSize.h}` : state.size;
+}
+
+function aspectCheck() {
+  const model = currentModel();
+  if (!model.customAspect) return {};
+  const { w, h } = ratioParts(resolvedAspect());
+  return checkMjRatio(w, h);
+}
+
+function sizeCheck() {
+  if (currentModel().family !== 'gpt' || state.size === 'auto') return {};
+  const [w, h] = resolvedSize().split('x').map(wholeNumber);
+  return checkGptSize(w, h);
+}
+
+function updateAspectCustom() {
+  const isCustom = state.aspect === 'custom';
+  els.aspectCustom.hidden = !isCustom;
+  const shape = els.aspectGrid.querySelector('.is-custom .aspect-shape span');
+  const { w, h } = state.customAspect;
+  if (shape && w && h) setShape(shape, w, h);
+  showNote(els.aspectNote, aspectCheck(), isCustom ? [els.aspectW, els.aspectH] : []);
+}
+
+function updateSizeCustom() {
+  const isCustom = state.size === 'custom';
+  els.sizeCustom.hidden = !isCustom;
+  showNote(els.sizeNote, sizeCheck(), isCustom ? [els.sizeW, els.sizeH] : []);
 }
 
 function renderSegmented(container, name, values, current, onChange, format = String) {
@@ -423,6 +542,7 @@ function renderControls() {
   showControl('background', isGpt);
 
   if (model.aspectRatios) renderAspects(model);
+  updateSizeCustom();
   if (model.resolutions) {
     if (!model.resolutions.includes(state.resolution)) state.resolution = model.defaultResolution;
     renderSegmented(els.resGroup, 'resolution', model.resolutions, state.resolution, (value) => {
@@ -450,7 +570,26 @@ function initControls() {
   els.size.addEventListener('change', () => {
     state.size = els.size.value;
     savePrefs();
+    updateSizeCustom();
   });
+  els.sizeW.value = String(state.customSize.w);
+  els.sizeH.value = String(state.customSize.h);
+  const onSizeInput = () => {
+    state.customSize = { w: wholeNumber(els.sizeW.value) || 0, h: wholeNumber(els.sizeH.value) || 0 };
+    savePrefs();
+    updateSizeCustom();
+    clearFormError();
+  };
+  els.sizeW.addEventListener('input', onSizeInput);
+  els.sizeH.addEventListener('input', onSizeInput);
+  const onAspectInput = () => {
+    state.customAspect = { w: wholeNumber(els.aspectW.value) || 0, h: wholeNumber(els.aspectH.value) || 0 };
+    savePrefs();
+    updateAspectCustom();
+    clearFormError();
+  };
+  els.aspectW.addEventListener('input', onAspectInput);
+  els.aspectH.addEventListener('input', onAspectInput);
   els.quality.addEventListener('change', () => {
     state.quality = els.quality.value;
     savePrefs();
@@ -625,10 +764,10 @@ class StudioError extends Error {
 function snapshotJob() {
   const model = currentModel();
   const params = {};
-  if (model.aspectRatios) params.aspect = state.aspect;
+  if (model.aspectRatios) params.aspect = resolvedAspect();
   if (model.resolutions) params.resolution = state.resolution;
   if (model.family === 'gpt') {
-    params.size = state.size;
+    params.size = resolvedSize();
     params.quality = state.quality;
     params.background = state.background;
   }
@@ -1170,6 +1309,10 @@ function validate() {
     els.prompt.focus();
     return 'Write a prompt first.';
   }
+  const ratio = aspectCheck();
+  if (ratio.error) return `Aspect ratio: ${ratio.error}`;
+  const size = sizeCheck();
+  if (size.error) return `Size: ${size.error}`;
   const problems = refProblems();
   if (problems.length) return problems.join(' ');
   return '';

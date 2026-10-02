@@ -18,6 +18,7 @@
   --accent-soft: rgba(139, 77, 255, 0.16);
   --on-accent: #ffffff;
   --danger: #ff8193;
+  --warn: #f5c26b;
   --danger-soft: rgba(255, 129, 147, 0.1);
   --checker-a: #1a1522;
   --checker-b: #221b2c;
@@ -40,6 +41,7 @@
   --accent-soft: rgba(116, 52, 236, 0.1);
   --on-accent: #ffffff;
   --danger: #b8233b;
+  --warn: #8a5300;
   --danger-soft: rgba(184, 35, 59, 0.07);
   --checker-a: #efebf5;
   --checker-b: #e5dfee;
@@ -344,6 +346,7 @@ textarea {
 
 input[type="password"],
 input[type="text"],
+input[type="number"],
 textarea,
 select {
   width: 100%;
@@ -536,6 +539,10 @@ select:hover {
   height: var(--h);
   border: 1.5px solid var(--muted);
   border-radius: 2px;
+}
+
+.aspect-option.is-custom .aspect-shape span {
+  border-style: dashed;
 }
 
 .aspect-option:hover {
@@ -755,6 +762,46 @@ select:hover {
 
 .ref-remove:hover {
   background: var(--danger);
+}
+
+.custom-dims {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.custom-dims input {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 120px;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.custom-dims input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field-note {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.field-note:empty {
+  display: none;
+}
+
+.field-note.is-warn {
+  color: var(--warn);
+}
+
+.field-note.is-error {
+  color: var(--danger);
 }
 
 .field-error,
