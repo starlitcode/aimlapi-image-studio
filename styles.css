@@ -19,6 +19,7 @@
   --on-accent: #ffffff;
   --danger: #ff8193;
   --warn: #f5c26b;
+  --ok: #6fd39a;
   --param-name: #ff5fb9;
   --param-value: #ff94cf;
   --danger-soft: rgba(255, 129, 147, 0.1);
@@ -44,6 +45,7 @@
   --on-accent: #ffffff;
   --danger: #b8233b;
   --warn: #8a5300;
+  --ok: #17703f;
   --param-name: #b4126e;
   --param-value: #b0447c;
   --danger-soft: rgba(184, 35, 59, 0.07);
@@ -542,10 +544,75 @@ select:hover {
   outline-offset: 2px;
 }
 
+.model-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 .model-name {
   display: block;
   font-weight: 600;
   font-size: var(--text-sm);
+}
+
+/* live model status from api.airforce: a dot plus a word, so it doesn't rely on colour alone */
+.model-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.model-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.model-status.is-ok {
+  color: var(--ok);
+}
+
+.model-status.is-warn {
+  color: var(--warn);
+}
+
+.model-status.is-bad {
+  color: var(--danger);
+}
+
+.status-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+
+.text-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.text-btn:disabled {
+  color: var(--muted);
+  text-decoration: none;
+  cursor: default;
 }
 
 .model-id {

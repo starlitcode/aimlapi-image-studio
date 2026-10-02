@@ -1,6 +1,19 @@
 'use strict';
 
 const API_URL = 'https://api.airforce/v1/images/generations';
+// Public model list with each model's live status. It needs no key, so none is sent.
+const MODELS_URL = 'https://api.airforce/v1/models';
+// api.airforce probes every 5 minutes, so checking more often shows nothing new.
+const STATUS_REFRESH_MS = 5 * 60 * 1000;
+// After a failed image, recheck status if the last check is older than this.
+const STATUS_RECHECK_MS = 30 * 1000;
+const STATUS_LOOK = {
+  operational: { label: 'up', tone: 'ok' },
+  degraded: { label: 'slow', tone: 'warn' },
+  partial_outage: { label: 'partial outage', tone: 'warn' },
+  major_outage: { label: 'major outage', tone: 'bad' },
+  down: { label: 'down', tone: 'bad' },
+};
 
 // Long renders (4K, high quality) can take minutes. Past this the request is dropped.
 const REQUEST_TIMEOUT_MS = 6 * 60 * 1000;
@@ -123,6 +136,9 @@ const els = {
   themeToggle: $('#theme-toggle'),
   form: $('#gen-form'),
   modelList: $('#model-list'),
+  modelWarning: $('#model-warning'),
+  statusText: $('#status-text'),
+  statusRefresh: $('#status-refresh'),
   prompt: $('#prompt'),
   promptMirror: $('#prompt-mirror'),
   aspectGrid: $('#aspect-grid'),
@@ -172,6 +188,10 @@ const state = {
 
 let nextId = 1;
 const cards = new Map();
+
+// answered: null before the first check, true once api.airforce replied, false if the
+// latest check failed. A failed check keeps the last good statuses instead of wiping them.
+const modelStatus = { byId: new Map(), checkedAt: 0, answered: null, loading: false };
 
 /* ---------- storage (any of these can throw in private mode or when blocked) ---------- */
 
@@ -402,6 +422,85 @@ function normalizeMjPrompt(prompt) {
   return prompt.replace(/(^|\s)[\u2014\u2013](?=[A-Za-z])/g, '$1--');
 }
 
+/* ---------- live model status ---------- */
+
+function statusOf(modelId) {
+  if (!modelStatus.byId.size) return { label: 'unknown', tone: 'unknown' };
+  if (!modelStatus.byId.has(modelId)) return { label: 'not listed', tone: 'bad' };
+  const raw = modelStatus.byId.get(modelId);
+  return STATUS_LOOK[raw] || { label: raw.replace(/_/g, ' ') || 'unknown', tone: 'warn' };
+}
+
+function timeAgo(ms) {
+  const minutes = Math.floor((Date.now() - ms) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.floor(minutes / 60)} h ago`;
+}
+
+function renderStatus() {
+  for (const pill of els.modelList.querySelectorAll('.model-status')) {
+    const look = statusOf(pill.dataset.model);
+    pill.textContent = look.label;
+    pill.className = `model-status is-${look.tone}`;
+  }
+  for (const button of document.querySelectorAll('.card-mj-buttons button')) {
+    const look = statusOf(button.dataset.model);
+    button.textContent = look.tone === 'bad' ? `${button.dataset.label} (${look.label})` : button.dataset.label;
+  }
+
+  if (modelStatus.loading) els.statusText.textContent = 'checking status...';
+  else if (modelStatus.answered === false && modelStatus.checkedAt) els.statusText.textContent = `couldn't refresh, status from ${timeAgo(modelStatus.checkedAt)}`;
+  else if (modelStatus.answered === false) els.statusText.textContent = "couldn't check status";
+  else if (modelStatus.checkedAt) els.statusText.textContent = `status checked ${timeAgo(modelStatus.checkedAt)}`;
+  else els.statusText.textContent = '';
+  els.statusRefresh.disabled = modelStatus.loading;
+
+  const model = currentModel();
+  const look = statusOf(model.id);
+  const warning = look.tone === 'bad' ? `api.airforce lists ${model.name} as ${look.label} right now, so it will probably fail.`
+    : look.tone === 'warn' ? `api.airforce lists ${model.name} as ${look.label} right now. It may be slow or fail.`
+    : '';
+  showNote(els.modelWarning, look.tone === 'bad' ? { error: warning } : { warning });
+}
+
+async function refreshStatus() {
+  if (modelStatus.loading) return;
+  modelStatus.loading = true;
+  renderStatus();
+  try {
+    const response = await fetch(MODELS_URL, { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const list = payload && Array.isArray(payload.data) ? payload.data : null;
+    if (!list) throw new Error('unexpected shape');
+    const wanted = new Set([...MODELS.map((m) => m.id), ...MJ_ACTIONS.map((a) => a.model)]);
+    modelStatus.byId = new Map(
+      list.filter((m) => m && wanted.has(m.id)).map((m) => [m.id, typeof m.status === 'string' ? m.status : '']),
+    );
+    modelStatus.checkedAt = Date.now();
+    modelStatus.answered = true;
+  } catch (_) {
+    modelStatus.answered = false;
+  } finally {
+    modelStatus.loading = false;
+    renderStatus();
+  }
+}
+
+function initStatus() {
+  els.statusRefresh.addEventListener('click', refreshStatus);
+  const refreshIfStale = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (Date.now() - modelStatus.checkedAt >= STATUS_REFRESH_MS) refreshStatus();
+    else renderStatus();
+  };
+  // a minute tick keeps "checked x min ago" honest and refreshes once the data is 5 minutes old
+  setInterval(refreshIfStale, 60 * 1000);
+  document.addEventListener('visibilitychange', refreshIfStale);
+  refreshStatus();
+}
+
 /* ---------- form controls ---------- */
 
 function currentModel() {
@@ -428,6 +527,12 @@ function renderModels() {
       const name = document.createElement('span');
       name.className = 'model-name';
       name.textContent = model.name;
+      const pill = document.createElement('span');
+      pill.className = 'model-status';
+      pill.dataset.model = model.id;
+      const head = document.createElement('span');
+      head.className = 'model-head';
+      head.append(name, pill);
       const id = document.createElement('span');
       id.className = 'model-id';
       id.textContent = model.id;
@@ -438,9 +543,10 @@ function renderModels() {
         makeRadio('model', model.id, model.id === state.modelId, (value) => {
           state.modelId = value;
           renderControls();
+          renderStatus();
           savePrefs();
         }),
-        name,
+        head,
         id,
         note,
       );
@@ -1196,7 +1302,10 @@ function createCard(job) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'ghost-btn';
-      button.textContent = action.label;
+      button.dataset.model = action.model;
+      button.dataset.label = action.label;
+      const look = statusOf(action.model);
+      button.textContent = look.tone === 'bad' ? `${action.label} (${look.label})` : action.label;
       button.addEventListener('click', () => runMjAction(card, action));
       return button;
     }),
@@ -1290,7 +1399,19 @@ async function runCard(card) {
     showResult(card, png, Date.now() - started);
   } catch (err) {
     if (!cards.has(card.id)) return;
+    const apiFailure = err instanceof ApiError || err instanceof StudioError;
+    if (apiFailure && Date.now() - modelStatus.checkedAt > STATUS_RECHECK_MS) await refreshStatus();
+    if (!cards.has(card.id)) return;
     const info = describeError(err, job, timedOut);
+    const look = statusOf(job.modelId);
+    if (apiFailure && look.tone === 'bad') {
+      if (err instanceof ApiError && err.status === 404) {
+        info.title = 'Model is down';
+        info.body = `api.airforce lists ${job.modelId} as ${look.label} right now, so it isn't taking requests. Try again later or pick another model.`;
+      } else {
+        info.body += ` api.airforce lists ${job.modelId} as ${look.label} right now.`;
+      }
+    }
     if (err instanceof ApiError && err.attempts > 1) info.body += ` Tried ${err.attempts} times.`;
     const reportable = !timedOut && (err instanceof ApiError || err instanceof TypeError);
     showFailure(card, info, reportable ? errorReport(err, job, new Date()) : '');
@@ -1537,6 +1658,7 @@ loadPrefs();
 initTheme();
 initKey();
 initControls();
+initStatus();
 initPrompt();
 initRefs();
 initViewer();

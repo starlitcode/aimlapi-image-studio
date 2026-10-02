@@ -58,8 +58,15 @@
   <main class="layout">
     <form id="gen-form" class="panel" novalidate>
       <div class="field">
-        <span class="label" id="model-label">model</span>
+        <div class="label-row">
+          <span class="label" id="model-label">model</span>
+          <span class="status-line">
+            <span id="status-text" role="status"></span>
+            <button type="button" class="text-btn" id="status-refresh">refresh</button>
+          </span>
+        </div>
         <div class="model-list" role="radiogroup" aria-labelledby="model-label" id="model-list"></div>
+        <p class="field-note" id="model-warning" role="status"></p>
       </div>
 
       <div class="field">
