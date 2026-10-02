@@ -14,7 +14,7 @@
 //   GET  /image?url=... fetches a finished image so the page can read it
 
 const BIGJPG = 'https://bigjpg.com';
-const ALLOWED_ORIGIN = 'https://starlitcode.github.io';
+const ALLOWED_ORIGIN = 'https://api-airforce-image-generator.pages.dev';
 const EXTENSIONS = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
 function cors(origin) {
