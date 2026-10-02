@@ -4,6 +4,9 @@ const API_URL = 'https://api.airforce/v1/images/generations';
 
 // Long renders (4K, high quality) can take minutes. Past this the request is dropped.
 const REQUEST_TIMEOUT_MS = 6 * 60 * 1000;
+// When the model's provider fails (502/503, or a failure inside the stream), try again
+// after these pauses before giving up. Other errors are never retried.
+const RETRY_DELAYS_MS = [3000, 8000];
 // How long a removed image can still be brought back
 const UNDO_SECONDS = 8;
 const MB = 1024 * 1024;
@@ -820,6 +823,7 @@ class ApiError extends Error {
     this.serverMessage = message || '';
     this.traceId = ids.traceId || '';
     this.cfRay = ids.cfRay || '';
+    this.httpStatus = ids.httpStatus || status;
   }
 }
 
@@ -900,12 +904,20 @@ function parsePayload(text) {
   return found;
 }
 
-function errorFromPayload(status, payload, ids) {
+function errorFromPayload(httpStatus, payload, ids) {
   const err = payload && payload.error;
-  if (!err) return new ApiError(status, '', '', ids);
-  if (typeof err === 'string') return new ApiError(status, '', err, ids);
-  const code = Number(err.code);
-  return new ApiError(status >= 400 ? status : code || status, err.type, err.message, ids);
+  const message = typeof err === 'string' ? err : (err && err.message) || '';
+  const type = err && typeof err === 'object' ? err.type : '';
+  let status = httpStatus;
+  // api.airforce can answer 200 and report the failure inside the stream, e.g.
+  // "Image generation failed, provider returned status 503". The real status then
+  // comes from the error's code, or failing that from the message itself.
+  if (status < 400) {
+    const code = Number(err && err.code);
+    const mentioned = /\bstatus (\d{3})\b/i.exec(message);
+    status = code >= 400 ? code : mentioned ? Number(mentioned[1]) : 0;
+  }
+  return new ApiError(status, type, message, { ...ids, httpStatus });
 }
 
 async function requestImage(job, signal) {
@@ -1015,9 +1027,19 @@ async function fetchImageBytes(url, signal) {
 
 /* ---------- error messages ---------- */
 
+// API messages sometimes use a long dash as punctuation; show a comma instead.
+// An unspaced en dash is a range like 5\u201310, so it becomes a hyphen.
+function plainDashes(text) {
+  return text
+    .replace(/\s*\u2014\s*/g, ', ')
+    .replace(/\s+\u2013\s+/g, ', ')
+    .replace(/\u2013/g, '-')
+    .replace(/^,\s*/, '');
+}
+
 function cleanServerMessage(message) {
   if (!message) return '';
-  const text = redact(String(message)).trim();
+  const text = plainDashes(redact(String(message)).trim());
   if (text.startsWith('<')) return '';
   return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
@@ -1059,6 +1081,16 @@ function describeError(err, job, timedOut) {
     const s = err.status;
     const type = err.type.toLowerCase();
     const model = job.modelId;
+    // A failure reported inside a successful response came from the model's provider,
+    // not from api.airforce or your key, so the usual status meanings don't apply.
+    if (err.httpStatus < 400) {
+      if (s === 429) return { title: 'Rate limited', body: withDetail(`The service behind ${model} is busy. Wait a bit and try again.`) };
+      if (s >= 500) {
+        return { title: 'The provider failed', body: withDetail(`The service behind ${model} returned an error (${s}). This is usually temporary. Try again in a minute, or switch models.`) };
+      }
+      if (s >= 400) return { title: 'Request rejected', body: detail || `The service behind ${model} refused this request.` };
+      return { title: 'Generation failed', body: withDetail(`${model} couldn't finish this one. Try again, or switch models if it keeps failing.`) };
+    }
     if (s === 401) {
       return { title: 'Key rejected', body: "api.airforce didn't accept your key. Check it matches the one in Dashboard → API Keys and enter it again.", openKey: true };
     }
@@ -1189,6 +1221,44 @@ function stopCardTimers(card) {
   card.timeout = null;
 }
 
+function isProviderFailure(err) {
+  if (!(err instanceof ApiError)) return false;
+  if (err.httpStatus < 400) return err.status === 0 || err.status >= 500;
+  return err.status === 502 || err.status === 503;
+}
+
+function pause(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const aborted = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', aborted);
+      resolve();
+    }, ms);
+    if (signal.aborted) aborted();
+    else signal.addEventListener('abort', aborted, { once: true });
+  });
+}
+
+async function requestWithRetries(card, signal) {
+  const note = card.q('.pending-note');
+  const attempts = RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await requestImage(card.job, signal);
+    } catch (err) {
+      if (attempt >= attempts || !isProviderFailure(err)) {
+        if (err instanceof ApiError) err.attempts = attempt;
+        throw err;
+      }
+      note.textContent = `The provider failed. Trying again (${attempt + 1} of ${attempts})...`;
+      await pause(RETRY_DELAYS_MS[attempt - 1], signal);
+    }
+  }
+}
+
 async function runCard(card) {
   const { job } = card;
   stopCardTimers(card);
@@ -1198,6 +1268,7 @@ async function runCard(card) {
   const started = Date.now();
   const elapsed = card.q('.elapsed');
   elapsed.textContent = '0s';
+  card.q('.pending-note').textContent = '';
   card.timer = setInterval(() => {
     elapsed.textContent = formatElapsed(Date.now() - started);
   }, 1000);
@@ -1212,7 +1283,7 @@ async function runCard(card) {
 
   try {
     if (!state.apiKey) throw new StudioError('no-key');
-    const answer = await requestImage(job, controller.signal);
+    const answer = await requestWithRetries(card, controller.signal);
     const bytes = answer.base64 ? base64ToBytes(answer.base64) : await fetchImageBytes(answer.url, controller.signal);
     const png = await toPng(bytes);
     if (!cards.has(card.id)) return;
@@ -1220,6 +1291,7 @@ async function runCard(card) {
   } catch (err) {
     if (!cards.has(card.id)) return;
     const info = describeError(err, job, timedOut);
+    if (err instanceof ApiError && err.attempts > 1) info.body += ` Tried ${err.attempts} times.`;
     const reportable = !timedOut && (err instanceof ApiError || err instanceof TypeError);
     showFailure(card, info, reportable ? errorReport(err, job, new Date()) : '');
   } finally {
@@ -1257,10 +1329,15 @@ function errorReport(err, job, when) {
     `settings: ${describeParams(job).split(' · ').slice(1).join(' · ') || 'defaults'}`,
   ];
   if (err instanceof ApiError) {
-    lines.push(`status: ${err.status}`);
+    if (err.httpStatus < 400) {
+      lines.push(`status: ${err.status || 'unknown'} (reported inside an HTTP ${err.httpStatus} response)`);
+    } else {
+      lines.push(`status: ${err.status}`);
+    }
     if (err.type) lines.push(`type: ${err.type}`);
     const message = cleanServerMessage(err.serverMessage);
     if (message) lines.push(`message: ${message}`);
+    if (err.attempts > 1) lines.push(`attempts: ${err.attempts}`);
     if (err.traceId) lines.push(`trace id: ${err.traceId}`);
     if (err.cfRay) lines.push(`cf-ray: ${err.cfRay}`);
   } else {

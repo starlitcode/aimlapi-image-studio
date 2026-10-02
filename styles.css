@@ -1041,6 +1041,16 @@ select:hover {
   font-size: var(--text-sm);
 }
 
+.pending-note {
+  max-width: 32ch;
+  color: var(--warn);
+  font-size: var(--text-xs);
+}
+
+.pending-note:empty {
+  display: none;
+}
+
 .spinner {
   width: 28px;
   height: 28px;
