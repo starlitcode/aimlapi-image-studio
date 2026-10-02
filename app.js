@@ -29,7 +29,7 @@ const MODELS = [
     name: 'GPT Image 2.5 Sunburst',
     note: 'OpenAI base model, tuned for quality.',
     family: 'gpt',
-    maxRefs: 4,
+    maxRefs: 16,
     refTypes: BASIC_REF_TYPES,
   },
   {
@@ -37,7 +37,7 @@ const MODELS = [
     name: 'GPT Image 2.5 Flare',
     note: 'OpenAI small model, tuned for speed.',
     family: 'gpt',
-    maxRefs: 4,
+    maxRefs: 16,
     refTypes: BASIC_REF_TYPES,
   },
   {
