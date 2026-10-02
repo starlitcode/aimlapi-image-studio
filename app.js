@@ -810,13 +810,14 @@ function initRefs() {
 /* ---------- request ---------- */
 
 class ApiError extends Error {
-  constructor(status, type, message, cfRay) {
+  constructor(status, type, message, ids = {}) {
     super(message || `HTTP ${status}`);
     this.name = 'ApiError';
     this.status = status;
     this.type = type || '';
     this.serverMessage = message || '';
-    this.cfRay = cfRay || '';
+    this.traceId = ids.traceId || '';
+    this.cfRay = ids.cfRay || '';
   }
 }
 
@@ -897,12 +898,12 @@ function parsePayload(text) {
   return found;
 }
 
-function errorFromPayload(status, payload, cfRay) {
+function errorFromPayload(status, payload, ids) {
   const err = payload && payload.error;
-  if (!err) return new ApiError(status, '', '', cfRay);
-  if (typeof err === 'string') return new ApiError(status, '', err, cfRay);
+  if (!err) return new ApiError(status, '', '', ids);
+  if (typeof err === 'string') return new ApiError(status, '', err, ids);
   const code = Number(err.code);
-  return new ApiError(status >= 400 ? status : code || status, err.type, err.message, cfRay);
+  return new ApiError(status >= 400 ? status : code || status, err.type, err.message, ids);
 }
 
 async function requestImage(job, signal) {
@@ -921,8 +922,12 @@ async function requestImage(job, signal) {
   const text = await response.text();
   const payload = parsePayload(text);
   if (!response.ok || (payload && payload.error)) {
-    // cf-ray helps api.airforce support find the request; it's null when CORS hides the header
-    throw errorFromPayload(response.status, payload, response.headers.get('cf-ray'));
+    // These let api.airforce support find the request. Their CORS setup exposes the trace id
+    // to browsers; cf-ray is usually hidden and comes back null.
+    throw errorFromPayload(response.status, payload, {
+      traceId: response.headers.get('x-airforce-trace-id'),
+      cfRay: response.headers.get('cf-ray'),
+    });
   }
 
   const item = payload && Array.isArray(payload.data) ? payload.data[0] : null;
@@ -1253,6 +1258,7 @@ function errorReport(err, job, when) {
     if (err.type) lines.push(`type: ${err.type}`);
     const message = cleanServerMessage(err.serverMessage);
     if (message) lines.push(`message: ${message}`);
+    if (err.traceId) lines.push(`trace id: ${err.traceId}`);
     if (err.cfRay) lines.push(`cf-ray: ${err.cfRay}`);
   } else {
     lines.push(`error: ${err && err.name ? err.name : 'unknown'}${err && err.message ? `: ${redact(err.message)}` : ''}`);

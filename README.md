@@ -41,5 +41,5 @@ Don't tick "remember" on a shared computer.
 ## Notes
 
 - Requests use `sse: true` so long renders don't get cut off by proxy timeouts. If nothing comes back after 6 minutes, the request is dropped. You can also cancel a pending image yourself.
-- Error messages follow api.airforce's [troubleshooting guide](https://api.airforce/docs/troubleshooting/). Each one says what failed and what to try next. API and network errors also have a "details for a bug report" box with the fields their support asks for: time in UTC, endpoint, model, status, error body and `cf-ray`. Your key and your prompt are never included.
-- The page calls api.airforce directly from your browser. If you see "Couldn't reach api.airforce" even though your connection works, the API may be blocking browser requests (CORS). If that happens, the fix is a small proxy, which this repo doesn't include.
+- Error messages follow api.airforce's [troubleshooting guide](https://api.airforce/docs/troubleshooting/). Each one says what failed and what to try next. API and network errors also have a "details for a bug report" box with the fields their support asks for: time in UTC, endpoint, model, status, error body and the request's trace id. Your key and your prompt are never included.
+- The page calls api.airforce directly from your browser. api.airforce allows this (its CORS headers accept requests from the GitHub Pages address), so no proxy is needed.
