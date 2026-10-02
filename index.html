@@ -17,8 +17,8 @@
   <meta name="color-scheme" content="dark light">
   <title>Airforce Image Studio</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23120d1a'/%3E%3Crect x='7' y='9' width='18' height='14' rx='2' fill='none' stroke='%23a970ff' stroke-width='2.5'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=3eac17bd78">
-  <script src="app.js?v=905df177e2" defer></script>
+  <link rel="stylesheet" href="styles.css?v=bfec3f970e">
+  <script src="app.js?v=16b07d6cc0" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -189,8 +189,22 @@
         </div>
         <div class="gallery-actions">
           <button type="button" class="ghost-btn upscale-own" id="upscale-own">upscale my image</button>
+          <button type="button" class="ghost-btn upscale-own" id="upscale-several">upscale several</button>
           <input type="file" id="upscale-file" accept="image/png,image/jpeg,image/webp" multiple hidden>
           <button type="button" class="ghost-btn" id="clear-gallery" hidden>clear</button>
+        </div>
+      </div>
+      <div class="batch-bar" id="batch-bar" hidden>
+        <p class="batch-count" id="batch-count" role="status">Tick the images to upscale.</p>
+        <div class="card-upscale-row">
+          <select id="batch-style" aria-label="Image type"></select>
+          <select id="batch-scale" aria-label="Upscale amount"></select>
+          <select id="batch-noise" aria-label="Noise reduction"></select>
+        </div>
+        <div class="batch-actions">
+          <button type="button" class="ghost-btn" id="batch-all">select all</button>
+          <button type="button" class="ghost-btn" id="batch-done">done</button>
+          <button type="button" class="primary-btn small batch-start" id="batch-start" disabled>upscale</button>
         </div>
       </div>
       <div class="empty" id="empty">
@@ -213,6 +227,7 @@
     <li class="card">
       <div class="card-frame">
         <button type="button" class="card-open" aria-label="View full size"><img alt="" loading="lazy" decoding="async"></button>
+        <label class="card-pick"><input type="checkbox" class="card-pick-box" aria-label="Select for upscaling"></label>
         <div class="card-pending">
           <span class="spinner" aria-hidden="true"></span>
           <span class="elapsed">0s</span>

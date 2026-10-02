@@ -1439,6 +1439,65 @@ select:hover {
   margin: var(--space-2) 0 0;
 }
 
+/* "upscale several": a bar of shared settings under the results header, and a tick box on each finished image */
+.batch-bar {
+  position: sticky;
+  top: calc(var(--topbar-h) + var(--space-2));
+  z-index: 5;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.batch-count {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.batch-start {
+  margin-left: auto;
+}
+
+.card-pick {
+  display: none;
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 2;
+  width: var(--tap);
+  height: var(--tap);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.card-pick input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.is-selecting .card.is-done:not(.is-removed) .card-pick {
+  display: flex;
+}
+
+.is-selecting .card.is-picked {
+  border-color: var(--accent);
+}
+
 /* upscales and images picked from the device have no generator settings or prompt to reuse */
 .card.is-upscale .card-reuse,
 .card.is-import .card-reuse,

@@ -130,6 +130,8 @@ const UPSCALE_NOISE = [['-1', 'no noise reduction'], ['0', 'low noise reduction'
 // bigjpg took about 80 seconds for a 2x enlarge; checking every 10 seconds costs no API calls
 const UPSCALE_POLL_MS = 10 * 1000;
 const UPSCALE_TIMEOUT_MS = 30 * 60 * 1000;
+// bigjpg doesn't document a per-minute limit, so a batch runs a couple at a time and the rest wait
+const UPSCALE_AT_ONCE = 2;
 
 // The api.airforce docs list these models but not their exact contract, so each
 // action sends the finished image as the reference along with the original prompt.
@@ -210,6 +212,15 @@ const els = {
   clearGallery: $('#clear-gallery'),
   upscaleOwn: $('#upscale-own'),
   upscaleFile: $('#upscale-file'),
+  upscaleSeveral: $('#upscale-several'),
+  batchBar: $('#batch-bar'),
+  batchCount: $('#batch-count'),
+  batchStyle: $('#batch-style'),
+  batchScale: $('#batch-scale'),
+  batchNoise: $('#batch-noise'),
+  batchAll: $('#batch-all'),
+  batchDone: $('#batch-done'),
+  batchStart: $('#batch-start'),
   viewer: $('#viewer'),
   viewerImg: $('#viewer-img'),
   viewerClose: $('#viewer-close'),
@@ -234,6 +245,7 @@ const state = {
 
 let nextId = 1;
 const cards = new Map();
+const upscaleQueue = { running: 0, waiting: [] };
 
 // answered: null before the first check, true once api.airforce replied, false if the
 // latest check failed. A failed check keeps the last good statuses instead of wiping them.
@@ -483,6 +495,7 @@ function initUpscaler() {
     els.upscalerPassword.value = '';
     els.upscalerRemember.checked = false;
     renderUpscaler();
+    setSelecting(false);
     setUpscalerStatus('Upscaler removed from this browser.');
   });
 }
@@ -1538,6 +1551,7 @@ function updateGalleryChrome() {
   const hasCards = cards.size > 0;
   els.empty.hidden = hasCards;
   els.clearGallery.hidden = !hasCards;
+  renderBatch();
 }
 
 function createCard(job) {
@@ -1562,9 +1576,14 @@ function createCard(job) {
   node.classList.toggle('is-import', job.family === 'import');
 
   card.q('.card-cancel').addEventListener('click', () => {
-    if (card.controller && window.confirm('Stop generating this image?')) card.controller.abort();
+    const queued = upscaleQueue.waiting.includes(card);
+    if (!card.controller && !queued) return;
+    if (!window.confirm(queued ? 'Take this image out of the upscale line?' : 'Stop generating this image?')) return;
+    if (dequeueUpscale(card)) showFailure(card, { title: 'Cancelled', body: 'You took this one out of the line.' }, '');
+    else if (card.controller) card.controller.abort();
   });
-  card.q('.card-retry').addEventListener('click', () => runCard(card));
+  card.q('.card-retry').addEventListener('click', () => (card.job.family === 'upscale' ? queueUpscale(card) : runCard(card)));
+  card.q('.card-pick-box').addEventListener('change', renderBatch);
   card.q('.card-dismiss').addEventListener('click', () => {
     if (confirmCardRemoval(card)) removeCard(card);
   });
@@ -1822,6 +1841,7 @@ function removeWithUndo(card) {
   };
   tick();
   card.node.classList.add('is-removed');
+  renderBatch();
   card.undoTimer = setInterval(() => {
     left -= 1;
     if (left <= 0) removeCard(card);
@@ -1834,6 +1854,7 @@ function undoRemove(card) {
   clearInterval(card.undoTimer);
   card.undoTimer = null;
   card.node.classList.remove('is-removed');
+  renderBatch();
   card.q('.card-remove').focus();
 }
 
@@ -1950,12 +1971,12 @@ function renderUpscaleNote(card) {
   note.textContent = `Makes ${card.result.width * factor}×${card.result.height * factor}. Uses one bigjpg API call.`;
 }
 
-function startUpscale(card) {
+function startUpscale(card, options = state.upscale) {
   if (!card.result) return;
-  const { style, x2, noise } = state.upscale;
+  const { style, x2, noise } = options;
   const factor = 2 ** Number(x2);
   const { width, height, blob } = card.result;
-  runCard(createCard({
+  queueUpscale(createCard({
     modelId: 'bigjpg',
     modelName: 'bigjpg',
     family: 'upscale',
@@ -1965,6 +1986,91 @@ function startUpscale(card) {
     // the image to enlarge; kept in memory for "try again" and left out of what gets saved
     source: blob,
   }));
+}
+
+function queueUpscale(card) {
+  setCardState(card, 'pending');
+  card.q('.elapsed').textContent = '';
+  card.q('.pending-note').textContent = 'Waiting for other upscales to finish...';
+  upscaleQueue.waiting.push(card);
+  pumpUpscales();
+}
+
+function pumpUpscales() {
+  while (upscaleQueue.running < UPSCALE_AT_ONCE && upscaleQueue.waiting.length) {
+    const card = upscaleQueue.waiting.shift();
+    if (!cards.has(card.id)) continue;
+    upscaleQueue.running += 1;
+    runCard(card).finally(() => {
+      upscaleQueue.running -= 1;
+      pumpUpscales();
+    });
+  }
+}
+
+function dequeueUpscale(card) {
+  const index = upscaleQueue.waiting.indexOf(card);
+  if (index === -1) return false;
+  upscaleQueue.waiting.splice(index, 1);
+  return true;
+}
+
+/* ---------- upscale several at once ---------- */
+
+function pickableCards() {
+  return Array.from(cards.values()).filter((card) => card.result && !card.node.classList.contains('is-removed'));
+}
+
+function pickedCards() {
+  return pickableCards().filter((card) => card.q('.card-pick-box').checked);
+}
+
+function renderBatch() {
+  for (const card of cards.values()) card.node.classList.toggle('is-picked', card.q('.card-pick-box').checked);
+  const count = pickedCards().length;
+  els.batchCount.textContent = count ? `${count} selected` : 'Tick the images to upscale.';
+  els.batchStart.textContent = count ? `upscale ${count}` : 'upscale';
+  els.batchStart.disabled = count === 0;
+}
+
+function setSelecting(on) {
+  document.body.classList.toggle('is-selecting', on);
+  els.batchBar.hidden = !on;
+  if (!on) for (const card of cards.values()) card.q('.card-pick-box').checked = false;
+  if (on) {
+    els.batchStyle.value = state.upscale.style;
+    els.batchScale.value = state.upscale.x2;
+    els.batchNoise.value = state.upscale.noise;
+  }
+  renderBatch();
+}
+
+function initBatch() {
+  const selects = [[els.batchStyle, UPSCALE_STYLES, 'style'], [els.batchScale, UPSCALE_SCALES, 'x2'], [els.batchNoise, UPSCALE_NOISE, 'noise']];
+  for (const [select, options, name] of selects) {
+    fillSelect(select, options, state.upscale[name]);
+    select.addEventListener('change', () => {
+      state.upscale = { ...state.upscale, [name]: select.value };
+      savePrefs();
+    });
+  }
+  els.upscaleSeveral.addEventListener('click', () => setSelecting(!document.body.classList.contains('is-selecting')));
+  els.batchDone.addEventListener('click', () => setSelecting(false));
+  els.batchAll.addEventListener('click', () => {
+    for (const card of pickableCards()) card.q('.card-pick-box').checked = true;
+    renderBatch();
+  });
+  els.batchStart.addEventListener('click', () => {
+    const picked = pickedCards();
+    if (!picked.length) return;
+    const options = { ...state.upscale };
+    const s = picked.length > 1 ? 's' : '';
+    const settings = `${optionText(UPSCALE_SCALES, options.x2)}, ${optionText(UPSCALE_STYLES, options.style)}, ${optionText(UPSCALE_NOISE, options.noise)}`;
+    if (!window.confirm(`Upscale ${picked.length} image${s} (${settings})? Uses ${picked.length} bigjpg API call${s}.`)) return;
+    // oldest first: they're processed in that order and the gallery ends up mirroring the originals
+    for (const card of picked) startUpscale(card, options);
+    setSelecting(false);
+  });
 }
 
 async function upscalerFetch(path, init, signal) {
@@ -2416,7 +2522,7 @@ function initGenerate() {
   });
 
   els.clearGallery.addEventListener('click', () => {
-    const pending = Array.from(cards.values()).some((card) => card.controller);
+    const pending = upscaleQueue.waiting.length > 0 || Array.from(cards.values()).some((card) => card.controller);
     const message = pending
       ? 'Clear all results? Images still generating will be cancelled, and saved images are deleted from this device.'
       : 'Clear all results? They are deleted from this device too, so download anything you want to keep first.';
@@ -2434,6 +2540,7 @@ initTheme();
 initKey();
 initUpscaler();
 initUpscaleOwn();
+initBatch();
 initControls();
 initStatus();
 initPrompt();
