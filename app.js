@@ -32,9 +32,9 @@ const BASIC_REF_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
 const MODELS = [
   {
-    id: 'nano-banana-2',
-    name: 'Nano Banana 2',
-    note: "Google's Gemini 3.1 Flash Image. Up to 14 reference images, resolution up to 4K.",
+    id: 'gemini-3.1-flash-image',
+    name: 'Gemini 3.1 Flash Image',
+    note: 'Google. Up to 14 reference images, resolution up to 4K.',
     family: 'gemini',
     aspectRatios: ['1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9', '9:21', '1:4', '4:1', '1:8', '8:1'],
     resolutions: ['512', '1K', '2K', '4K'],

@@ -6,7 +6,7 @@ A small web page for generating images through [api.airforce](https://api.airfor
 
 | Model ID | Settings |
 | --- | --- |
-| `nano-banana-2` (Gemini 3.1 Flash Image) | 15 aspect ratios, resolution 512 / 1K / 2K / 4K, up to 14 reference images, 7 MB each (PNG, JPEG, WebP, HEIC, HEIF) |
+| `gemini-3.1-flash-image` | 15 aspect ratios, resolution 512 / 1K / 2K / 4K, up to 14 reference images, 7 MB each (PNG, JPEG, WebP, HEIC, HEIF) |
 | `gpt-image-2.5-sunburst` | preset or custom size, quality (auto to max), background (auto, opaque, transparent), up to 16 reference images, 20 MB each (PNG, JPEG, WebP) |
 | `gpt-image-2.5-flare` | same as Sunburst |
 | `mj_imagine` | 14 preset ratios or any custom whole-number ratio from 1:99 to 99:1, up to 4 reference images, 7 MB each (PNG, JPEG, WebP) |
