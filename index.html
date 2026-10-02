@@ -80,6 +80,12 @@
       <div class="field" data-control="aspect">
         <span class="label" id="aspect-label">aspect ratio</span>
         <div class="aspect-grid" role="radiogroup" aria-labelledby="aspect-label" id="aspect-grid"></div>
+        <div class="custom-dims" id="aspect-custom" hidden>
+          <input type="number" id="aspect-w" inputmode="numeric" min="1" step="1" aria-label="Ratio width">
+          <span aria-hidden="true">:</span>
+          <input type="number" id="aspect-h" inputmode="numeric" min="1" step="1" aria-label="Ratio height">
+        </div>
+        <p class="field-note" id="aspect-note" role="status"></p>
       </div>
 
       <div class="field" data-control="resolution">
@@ -91,6 +97,13 @@
         <div class="field" data-control="size">
           <label class="label" for="size">size</label>
           <select id="size"></select>
+          <div class="custom-dims" id="size-custom" hidden>
+            <input type="number" id="size-w" inputmode="numeric" min="16" max="3840" step="16" aria-label="Width in pixels">
+            <span aria-hidden="true">×</span>
+            <input type="number" id="size-h" inputmode="numeric" min="16" max="3840" step="16" aria-label="Height in pixels">
+            <span class="custom-unit">px</span>
+          </div>
+          <p class="field-note" id="size-note" role="status"></p>
         </div>
         <div class="field" data-control="quality">
           <label class="label" for="quality">quality</label>

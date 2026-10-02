@@ -7,9 +7,11 @@ A small web page for generating images through [api.airforce](https://api.airfor
 | Model ID | Settings |
 | --- | --- |
 | `gemini-3.1-flash-image-preview` | 15 aspect ratios, resolution 512 / 1K / 2K / 4K, up to 14 reference images, 7 MB each (PNG, JPEG, WebP, HEIC, HEIF) |
-| `gpt-image-2.5-sunburst` | size, quality (auto to max), background (auto, opaque, transparent), up to 16 reference images, 20 MB each (PNG, JPEG, WebP) |
+| `gpt-image-2.5-sunburst` | preset or custom size, quality (auto to max), background (auto, opaque, transparent), up to 16 reference images, 20 MB each (PNG, JPEG, WebP) |
 | `gpt-image-2.5-flare` | same as Sunburst |
-| `mj_imagine` | 1:1, 4:5, 5:4, 4:3, 2:3, 3:2, 9:16, 16:9, 1:2, 3:1, 4:1, up to 4 reference images, 7 MB each (PNG, JPEG, WebP) |
+| `mj_imagine` | 14 preset ratios or any custom whole-number ratio from 1:99 to 99:1, up to 4 reference images, 7 MB each (PNG, JPEG, WebP) |
+
+Custom GPT sizes are checked against OpenAI's rules as you type: both sides must be multiples of 16, neither side can be over 3840, the shape has to stay between 1:3 and 3:1, and the total has to be 655,360 to 8,294,400 pixels. Anything above 2560 × 1440 is flagged as experimental. Midjourney ratios wider than 2:1 or taller than 1:2 get a warning that results can be unpredictable, but you can still use them.
 
 Midjourney results also get upscale, vary subtle, vary strong, reroll and zoom out buttons (`mj_upscale`, `mj_low_variation`, `mj_high_variation`, `mj_reroll`, `mj_zoom`). The api.airforce docs don't say what these models expect as input, so each button sends the finished image as a reference along with the original prompt. They're marked experimental in the UI.
 
