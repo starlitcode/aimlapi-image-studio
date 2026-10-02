@@ -38,6 +38,9 @@ const MODELS = [
     family: 'gemini',
     aspectRatios: ['1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9', '9:21', '1:4', '4:1', '1:8', '8:1'],
     resolutions: ['512', '1K', '2K', '4K'],
+    // What each button sends. api.airforce documents "512", "1024" and "2048" for Google's
+    // image models; 4K isn't documented, so "4096" follows the same pattern.
+    resolutionValues: { 512: '512', '1K': '1024', '2K': '2048', '4K': '4096' },
     defaultResolution: '1K',
     maxRefs: 14,
     maxRefMB: 7,
@@ -946,7 +949,10 @@ function snapshotJob() {
   const model = currentModel();
   const params = {};
   if (model.aspectRatios) params.aspect = resolvedAspect();
-  if (model.resolutions) params.resolution = state.resolution;
+  if (model.resolutions) {
+    params.resolution = state.resolution;
+    params.resolutionValue = model.resolutionValues[state.resolution] || state.resolution;
+  }
   if (model.family === 'gpt') {
     params.size = resolvedSize();
     params.quality = state.quality;
@@ -974,7 +980,7 @@ function buildBody(job) {
   };
   const p = job.params;
   if (p.aspect) body.aspect_ratio = p.aspect;
-  if (p.resolution) body.resolution = p.resolution;
+  if (p.resolution) body.resolution = p.resolutionValue || p.resolution;
   if (p.size && p.size !== 'auto') body.size = p.size;
   if (p.quality && p.quality !== 'auto') body.quality = p.quality;
   if (p.background && p.background !== 'auto') body.background = p.background;
