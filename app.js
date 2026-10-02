@@ -49,9 +49,11 @@ const MODELS = [
     aspectRatios: ['1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9', '9:21', '1:4', '4:1', '1:8', '8:1'],
     resolutions: ['1K', '2K', '4K'],
     // On api.airforce each resolution is its own model, and a "resolution" field in the
-    // request gets the call rejected. The plain model is 1K; there is no 512 model.
+    // request gets the call rejected. There is no 512 model. 1K goes through nano-banana-2
+    // because gemini-3.1-flash-image-preview fails every request with a provider 400;
+    // nano-banana-2 always renders 1K whatever size is sent (16:9 came back 1376x768).
     resolutionModels: {
-      '1K': 'gemini-3.1-flash-image-preview',
+      '1K': 'nano-banana-2',
       '2K': 'gemini-3.1-flash-image-preview-2k',
       '4K': 'gemini-3.1-flash-image-preview-4k',
     },
@@ -538,7 +540,7 @@ function renderStatus() {
 // Token-priced models (GPT) have no fixed price per image, so they return null.
 function priceOf(entry) {
   const table = entry.customer_price_table;
-  if (!table || table.summary_unit !== 'per_request') return null;
+  if (!table || (table.summary_unit !== 'per_request' && table.summary_unit !== 'per_image')) return null;
   const value = Number(entry.pricepermilliontokens);
   return Number.isFinite(value) && value > 0 ? value / 100000 : null;
 }
