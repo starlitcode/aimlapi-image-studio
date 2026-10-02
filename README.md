@@ -13,6 +13,8 @@ A small web page for generating images through [api.airforce](https://api.airfor
 
 Custom GPT sizes are checked against OpenAI's rules as you type: both sides must be multiples of 16, neither side can be over 3840, the shape has to stay between 1:3 and 3:1, and the total has to be 655,360 to 8,294,400 pixels. Anything above 2560 × 1440 is flagged as experimental. Midjourney ratios wider than 2:1 or taller than 1:2 get a warning that results can be unpredictable, but you can still use them.
 
+Midjourney [parameters](https://docs.midjourney.com/hc/en-us/articles/32859204029709-Parameter-List) like `--ar 16:9`, `--v 7` or `--no boats` turn pink in the prompt box and on result cards, a stronger pink for the name and a softer one for the value. A parameter only counts when there's a space before the `--`, which is Midjourney's own rule. Phones often turn `--` into a long dash (—) as you type, so that gets colored too and is changed back to `--` before a Midjourney request goes out.
+
 Midjourney results also get upscale, vary subtle, vary strong, reroll and zoom out buttons (`mj_upscale`, `mj_low_variation`, `mj_high_variation`, `mj_reroll`, `mj_zoom`). The api.airforce docs don't say what these models expect as input, so each button sends the finished image as a reference along with the original prompt. They're marked experimental in the UI.
 
 ## Output is always PNG

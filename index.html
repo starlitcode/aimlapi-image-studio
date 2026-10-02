@@ -64,7 +64,10 @@
 
       <div class="field">
         <label class="label" for="prompt">prompt</label>
-        <textarea id="prompt" rows="5" placeholder="What should the image show?" spellcheck="true"></textarea>
+        <div class="prompt-wrap">
+          <div class="prompt-mirror" id="prompt-mirror" aria-hidden="true"></div>
+          <textarea id="prompt" rows="5" placeholder="What should the image show?" spellcheck="true"></textarea>
+        </div>
         <details class="tips">
           <summary>prompt tips</summary>
           <ul>

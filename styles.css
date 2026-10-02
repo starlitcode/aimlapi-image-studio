@@ -19,6 +19,8 @@
   --on-accent: #ffffff;
   --danger: #ff8193;
   --warn: #f5c26b;
+  --param-name: #ff5fb9;
+  --param-value: #ff94cf;
   --danger-soft: rgba(255, 129, 147, 0.1);
   --checker-a: #1a1522;
   --checker-b: #221b2c;
@@ -42,6 +44,8 @@
   --on-accent: #ffffff;
   --danger: #b8233b;
   --warn: #8a5300;
+  --param-name: #b4126e;
+  --param-value: #b0447c;
   --danger-soft: rgba(184, 35, 59, 0.07);
   --checker-a: #efebf5;
   --checker-b: #e5dfee;
@@ -364,6 +368,72 @@ textarea {
   resize: vertical;
   min-height: 120px;
   line-height: 1.5;
+}
+
+/*
+  A textarea can't colour part of its text, so the prompt is drawn twice: a mirror
+  behind it holds the coloured copy, and the textarea on top keeps the caret,
+  selection and typing with its own text made transparent. Both boxes must wrap
+  identically, so they share every property that affects line breaks.
+*/
+.prompt-wrap {
+  position: relative;
+}
+
+.prompt-mirror,
+.prompt-wrap textarea {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 4;
+  scrollbar-gutter: stable;
+}
+
+.prompt-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  pointer-events: none;
+}
+
+.prompt-wrap textarea {
+  position: relative;
+  border-color: var(--line-strong);
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.prompt-wrap textarea::placeholder {
+  color: var(--muted);
+}
+
+.param-name {
+  color: var(--param-name);
+}
+
+.param-value {
+  color: var(--param-value);
+}
+
+/* system high-contrast mode forces text colours, which would show both copies */
+@media (forced-colors: active) {
+  .prompt-mirror {
+    display: none;
+  }
+
+  .prompt-wrap textarea {
+    color: CanvasText;
+  }
 }
 
 select {

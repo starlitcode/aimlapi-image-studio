@@ -95,6 +95,14 @@ const MJ_ACTIONS = [
   { model: 'mj_zoom', label: 'zoom out' },
 ];
 
+// A Midjourney parameter is "--name" after whitespace, then its value up to the next
+// parameter (they all sit at the end of the prompt). Phones with smart punctuation turn
+// "--" into a long dash, so that counts as the same thing.
+const PARAM_START = /(^|\s)((?:--|[\u2014\u2013])[A-Za-z][A-Za-z0-9_-]*)/g;
+const PARAM_DASH = /^(?:--|[\u2014\u2013])/;
+// Flags that take no value, from docs.midjourney.com's parameter list
+const VALUELESS_PARAMS = new Set(['raw', 'tile', 'draft', 'fast', 'relax', 'turbo', 'stealth', 'public', 'hd', 'sd', 'video', 'loop']);
+
 const $ = (selector) => document.querySelector(selector);
 
 const els = {
@@ -111,6 +119,7 @@ const els = {
   form: $('#gen-form'),
   modelList: $('#model-list'),
   prompt: $('#prompt'),
+  promptMirror: $('#prompt-mirror'),
   aspectGrid: $('#aspect-grid'),
   aspectCustom: $('#aspect-custom'),
   aspectW: $('#aspect-w'),
@@ -327,6 +336,65 @@ function loadPrefs() {
   const pair = (value) => value && Number.isInteger(value.w) && Number.isInteger(value.h) && value.w > 0 && value.h > 0;
   if (pair(prefs.customAspect)) state.customAspect = { w: prefs.customAspect.w, h: prefs.customAspect.h };
   if (pair(prefs.customSize)) state.customSize = { w: prefs.customSize.w, h: prefs.customSize.h };
+}
+
+/* ---------- prompt parameter colouring ---------- */
+
+function promptSegments(text) {
+  const starts = [];
+  PARAM_START.lastIndex = 0;
+  let match;
+  while ((match = PARAM_START.exec(text))) {
+    starts.push({ index: match.index + match[1].length, name: match[2] });
+  }
+  const segments = [];
+  let pos = 0;
+  starts.forEach((start, i) => {
+    if (start.index > pos) segments.push({ text: text.slice(pos, start.index), kind: 'plain' });
+    const nameEnd = start.index + start.name.length;
+    const next = i + 1 < starts.length ? starts[i + 1].index : text.length;
+    const valueless = VALUELESS_PARAMS.has(start.name.replace(PARAM_DASH, '').toLowerCase());
+    segments.push({ text: start.name, kind: 'name' });
+    const rest = text.slice(nameEnd, next);
+    const value = valueless ? '' : rest.trimEnd();
+    if (value) segments.push({ text: value, kind: 'value' });
+    if (rest.length > value.length) segments.push({ text: rest.slice(value.length), kind: 'plain' });
+    pos = next;
+  });
+  if (pos < text.length) segments.push({ text: text.slice(pos), kind: 'plain' });
+  return segments;
+}
+
+function renderPrompt(container, text) {
+  container.replaceChildren(
+    ...promptSegments(text).map((segment) => {
+      if (segment.kind === 'plain') return document.createTextNode(segment.text);
+      const span = document.createElement('span');
+      span.className = segment.kind === 'name' ? 'param-name' : 'param-value';
+      span.textContent = segment.text;
+      return span;
+    }),
+  );
+}
+
+function syncPromptMirror() {
+  renderPrompt(els.promptMirror, els.prompt.value);
+  // a trailing newline only takes up a line once something follows it
+  els.promptMirror.append('\u00a0');
+  els.promptMirror.scrollTop = els.prompt.scrollTop;
+}
+
+function initPrompt() {
+  els.prompt.addEventListener('input', syncPromptMirror);
+  els.prompt.addEventListener('scroll', () => {
+    els.promptMirror.scrollTop = els.prompt.scrollTop;
+  });
+  syncPromptMirror();
+}
+
+// Midjourney expects "--"; undo the long dash a phone may have swapped in.
+function normalizeMjPrompt(prompt) {
+  return prompt.replace(/(^|\s)[\u2014\u2013](?=[A-Za-z])/g, '$1--');
 }
 
 /* ---------- form controls ---------- */
@@ -784,7 +852,7 @@ function snapshotJob() {
 function buildBody(job) {
   const body = {
     model: job.modelId,
-    prompt: job.prompt,
+    prompt: job.family === 'mj' || job.family === 'mj-action' ? normalizeMjPrompt(job.prompt) : job.prompt,
     n: 1,
     // base64 comes back in the response itself, so the image can be re-encoded
     // to PNG here without depending on the file host allowing cross-origin reads
@@ -1069,7 +1137,8 @@ function createCard(job) {
     q: (selector) => node.querySelector(selector),
   };
 
-  card.q('.card-prompt').textContent = job.prompt || '(no prompt)';
+  if (job.prompt) renderPrompt(card.q('.card-prompt'), job.prompt);
+  else card.q('.card-prompt').textContent = '(no prompt)';
   card.q('.card-info').textContent = describeParams(job);
   node.classList.toggle('is-mj', job.family === 'mj' || job.family === 'mj-action');
 
@@ -1352,6 +1421,7 @@ loadPrefs();
 initTheme();
 initKey();
 initControls();
+initPrompt();
 initRefs();
 initViewer();
 initGenerate();
