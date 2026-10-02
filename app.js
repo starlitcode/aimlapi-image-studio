@@ -595,12 +595,13 @@ function initRefs() {
 /* ---------- request ---------- */
 
 class ApiError extends Error {
-  constructor(status, type, message) {
+  constructor(status, type, message, cfRay) {
     super(message || `HTTP ${status}`);
     this.name = 'ApiError';
     this.status = status;
     this.type = type || '';
     this.serverMessage = message || '';
+    this.cfRay = cfRay || '';
   }
 }
 
@@ -681,12 +682,12 @@ function parsePayload(text) {
   return found;
 }
 
-function errorFromPayload(status, payload) {
+function errorFromPayload(status, payload, cfRay) {
   const err = payload && payload.error;
-  if (!err) return new ApiError(status, '', '');
-  if (typeof err === 'string') return new ApiError(status, '', err);
+  if (!err) return new ApiError(status, '', '', cfRay);
+  if (typeof err === 'string') return new ApiError(status, '', err, cfRay);
   const code = Number(err.code);
-  return new ApiError(status >= 400 ? status : code || status, err.type, err.message);
+  return new ApiError(status >= 400 ? status : code || status, err.type, err.message, cfRay);
 }
 
 async function requestImage(job, signal) {
@@ -704,7 +705,10 @@ async function requestImage(job, signal) {
   });
   const text = await response.text();
   const payload = parsePayload(text);
-  if (!response.ok || (payload && payload.error)) throw errorFromPayload(response.status, payload);
+  if (!response.ok || (payload && payload.error)) {
+    // cf-ray helps api.airforce support find the request; it's null when CORS hides the header
+    throw errorFromPayload(response.status, payload, response.headers.get('cf-ray'));
+  }
 
   const item = payload && Array.isArray(payload.data) ? payload.data[0] : null;
   if (item && typeof item.b64_json === 'string' && item.b64_json) return { base64: item.b64_json };
@@ -826,17 +830,30 @@ function describeError(err, job, timedOut) {
     }
   }
 
+  // Wording follows https://api.airforce/docs/troubleshooting/
   if (err instanceof ApiError) {
     const detail = cleanServerMessage(err.serverMessage);
     const withDetail = (text) => (detail ? `${text} API said: ${detail}` : text);
     const s = err.status;
-    if (s === 401) return { title: 'Key rejected', body: "api.airforce didn't accept your key. Check it's still active in your dashboard and enter it again.", openKey: true };
-    if (s === 402) return { title: 'Out of credits', body: withDetail('Your account needs more credits for this model.') };
-    if (s === 403) return { title: 'No access', body: withDetail(`Your key can't use ${job.modelId}. It may need a paid plan.`) };
-    if (s === 404) return { title: 'Model not found', body: withDetail(`${job.modelId} isn't available right now.`) };
-    if (s === 413) return { title: 'Request too large', body: 'Use fewer or smaller reference images.' };
-    if (s === 429) return { title: 'Rate limited', body: withDetail('Too many requests or the daily cap was hit. Wait a minute and try again.') };
-    if (s >= 500) return { title: 'The model failed', body: withDetail('The upstream provider errored or is overloaded. Try again or switch models.') };
+    const type = err.type.toLowerCase();
+    const model = job.modelId;
+    if (s === 401) {
+      return { title: 'Key rejected', body: "api.airforce didn't accept your key. Check it matches the one in Dashboard → API Keys and enter it again.", openKey: true };
+    }
+    if (s === 402) return { title: 'Out of credits', body: withDetail('Your plan or pay-as-you-go balance is used up. Top up or subscribe from your dashboard.') };
+    if (s === 403) return { title: 'No access', body: withDetail(`Your plan or this key's permissions don't allow ${model}.`) };
+    if (s === 404 || type === 'unknown_model' || type === 'model_not_found') {
+      return { title: 'Model not found', body: withDetail(`${model} wasn't recognised or has been retired. Check the Models page on api.airforce.`) };
+    }
+    if (s === 413) return { title: 'Request too large', body: 'Shorten the prompt, or use fewer or smaller reference images.' };
+    if (s === 429) return { title: 'Rate limited', body: withDetail('Too many requests this minute, or a daily cap was hit. Wait a bit and try again.') };
+    if (s === 502) return { title: 'api.airforce is restarting', body: 'They deploy a few times a day. Wait 5 to 10 seconds and try again.' };
+    if (s === 503) {
+      return { title: 'Model unavailable', body: withDetail(`Every provider behind ${model} failed at once. Try another model, or report it if it lasts more than a few minutes.`) };
+    }
+    if (s >= 500) {
+      return { title: 'Server error', body: withDetail("Something broke on api.airforce's side. Try again, and report it if it keeps happening for more than a minute.") };
+    }
     if (s >= 400) return { title: 'Request rejected', body: detail || "The API didn't accept these settings. Try a different size, aspect ratio, or fewer references." };
     return { title: 'Something went wrong', body: detail || `The API returned status ${s}.` };
   }
@@ -915,6 +932,7 @@ function createCard(job) {
   card.q('.card-remove').addEventListener('click', () => removeCard(card));
   card.q('.card-open').addEventListener('click', () => openViewer(card));
   card.q('.card-copy').addEventListener('click', () => copyPrompt(card));
+  card.q('.card-report-copy').addEventListener('click', () => copyReport(card));
   card.q('.card-ref').addEventListener('click', () => useAsReference(card));
 
   card.q('.card-mj-buttons').replaceChildren(
@@ -977,7 +995,9 @@ async function runCard(card) {
     showResult(card, png, Date.now() - started);
   } catch (err) {
     if (!cards.has(card.id)) return;
-    showFailure(card, describeError(err, job, timedOut));
+    const info = describeError(err, job, timedOut);
+    const reportable = !timedOut && (err instanceof ApiError || err instanceof TypeError);
+    showFailure(card, info, reportable ? errorReport(err, job, new Date()) : '');
   } finally {
     stopCardTimers(card);
     card.controller = null;
@@ -1004,9 +1024,33 @@ function showResult(card, png, tookMs) {
   setCardState(card, 'done');
 }
 
-function showFailure(card, info) {
+// The checklist api.airforce asks for in a support ticket. It never includes the key or the prompt.
+function errorReport(err, job, when) {
+  const lines = [
+    `time: ${when.toISOString().slice(0, 19)}Z`,
+    'endpoint: POST /v1/images/generations',
+    `model: ${job.modelId}`,
+    `settings: ${describeParams(job).split(' · ').slice(1).join(' · ') || 'defaults'}`,
+  ];
+  if (err instanceof ApiError) {
+    lines.push(`status: ${err.status}`);
+    if (err.type) lines.push(`type: ${err.type}`);
+    const message = cleanServerMessage(err.serverMessage);
+    if (message) lines.push(`message: ${message}`);
+    if (err.cfRay) lines.push(`cf-ray: ${err.cfRay}`);
+  } else {
+    lines.push(`error: ${err && err.name ? err.name : 'unknown'}${err && err.message ? `: ${redact(err.message)}` : ''}`);
+  }
+  return lines.join('\n');
+}
+
+function showFailure(card, info, report) {
   card.q('.card-error-title').textContent = info.title;
   card.q('.card-error-body').textContent = info.body;
+  const reportBox = card.q('.card-report');
+  reportBox.hidden = !report;
+  reportBox.open = false;
+  card.q('.card-report pre').textContent = report || '';
   const link = card.q('.card-link');
   if (info.url && /^https:\/\//i.test(info.url)) {
     link.href = info.url;
@@ -1045,6 +1089,16 @@ async function copyPrompt(card) {
   } catch (_) {
     els.prompt.value = card.job.prompt;
     flashButton(button, 'put in prompt box');
+  }
+}
+
+async function copyReport(card) {
+  const button = card.q('.card-report-copy');
+  try {
+    await navigator.clipboard.writeText(card.q('.card-report pre').textContent);
+    flashButton(button, 'copied');
+  } catch (_) {
+    flashButton(button, 'select the text above');
   }
 }
 
