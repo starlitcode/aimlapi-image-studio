@@ -4,7 +4,7 @@ const API_URL = 'https://api.airforce/v1/images/generations';
 
 // Long renders (4K, high quality) can take minutes. Past this the request is dropped.
 const REQUEST_TIMEOUT_MS = 6 * 60 * 1000;
-const MAX_REF_BYTES = 7 * 1024 * 1024;
+const MB = 1024 * 1024;
 
 const STORAGE_KEY = 'airforce-image-studio:key';
 const STORAGE_THEME = 'airforce-image-studio:theme';
@@ -22,6 +22,7 @@ const MODELS = [
     resolutions: ['512', '1K', '2K', '4K'],
     defaultResolution: '1K',
     maxRefs: 14,
+    maxRefMB: 7,
     refTypes: [...BASIC_REF_TYPES, 'image/heic', 'image/heif'],
   },
   {
@@ -30,6 +31,7 @@ const MODELS = [
     note: 'OpenAI base model, tuned for quality.',
     family: 'gpt',
     maxRefs: 16,
+    maxRefMB: 20,
     refTypes: BASIC_REF_TYPES,
   },
   {
@@ -38,6 +40,7 @@ const MODELS = [
     note: 'OpenAI small model, tuned for speed.',
     family: 'gpt',
     maxRefs: 16,
+    maxRefMB: 20,
     refTypes: BASIC_REF_TYPES,
   },
   {
@@ -45,8 +48,9 @@ const MODELS = [
     name: 'Midjourney',
     note: 'Stylised looks. Upscale and vary results afterwards.',
     family: 'mj',
-    aspectRatios: ['1:1', '16:9', '9:16'],
+    aspectRatios: ['1:1', '4:5', '5:4', '4:3', '2:3', '3:2', '9:16', '16:9', '1:2', '3:1', '4:1'],
     maxRefs: 4,
+    maxRefMB: 7,
     refTypes: BASIC_REF_TYPES,
   },
 ];
@@ -429,7 +433,7 @@ function renderControls() {
 
   const heic = model.refTypes.includes('image/heic');
   els.refInput.accept = heic ? `${model.refTypes.join(',')},.heic,.heif` : model.refTypes.join(',');
-  els.refsHint.textContent = `PNG, JPEG, WebP${heic ? ', HEIC' : ''}. Up to ${model.maxRefs}, 7 MB each.`;
+  els.refsHint.textContent = `PNG, JPEG, WebP${heic ? ', HEIC' : ''}. Up to ${model.maxRefs}, ${model.maxRefMB} MB each.`;
   renderRefs();
 }
 
@@ -490,6 +494,10 @@ function refProblems(model = currentModel()) {
   if (unsupported.length) {
     problems.push(`${model.name} can't use HEIC references. Remove ${unsupported.map((r) => r.name).join(', ')}.`);
   }
+  const tooBig = state.refs.filter((ref) => ref.bytes > model.maxRefMB * MB);
+  if (tooBig.length) {
+    problems.push(`${model.name} takes images up to ${model.maxRefMB} MB. Remove ${tooBig.map((r) => r.name).join(', ')}.`);
+  }
   return problems;
 }
 
@@ -502,8 +510,8 @@ async function addRefBlob(blob, name) {
   if (!model.refTypes.includes(type)) {
     return `${name}: ${type || 'this file type'} isn't supported. Use PNG, JPEG or WebP.`;
   }
-  if (blob.size > MAX_REF_BYTES) {
-    return `${name} is over 7 MB.`;
+  if (blob.size > model.maxRefMB * MB) {
+    return `${name} is over ${model.maxRefMB} MB.`;
   }
   let base64;
   try {
@@ -511,7 +519,7 @@ async function addRefBlob(blob, name) {
   } catch (_) {
     return `${name} couldn't be read.`;
   }
-  state.refs.push({ id: nextId++, name, type, base64, previewUrl: URL.createObjectURL(blob) });
+  state.refs.push({ id: nextId++, name, type, bytes: blob.size, base64, previewUrl: URL.createObjectURL(blob) });
   return null;
 }
 

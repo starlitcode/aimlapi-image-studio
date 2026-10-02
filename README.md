@@ -6,14 +6,12 @@ A small web page for generating images through [api.airforce](https://api.airfor
 
 | Model ID | Settings |
 | --- | --- |
-| `gemini-3.1-flash-image-preview` | 15 aspect ratios, resolution 512 / 1K / 2K / 4K, up to 14 reference images (PNG, JPEG, WebP, HEIC, HEIF) |
-| `gpt-image-2.5-sunburst` | size, quality (auto to max), background (auto, opaque, transparent), up to 16 reference images (PNG, JPEG, WebP) |
+| `gemini-3.1-flash-image-preview` | 15 aspect ratios, resolution 512 / 1K / 2K / 4K, up to 14 reference images, 7 MB each (PNG, JPEG, WebP, HEIC, HEIF) |
+| `gpt-image-2.5-sunburst` | size, quality (auto to max), background (auto, opaque, transparent), up to 16 reference images, 20 MB each (PNG, JPEG, WebP) |
 | `gpt-image-2.5-flare` | same as Sunburst |
-| `mj_imagine` | 1:1, 16:9, 9:16, up to 4 reference images (PNG, JPEG, WebP) |
+| `mj_imagine` | 1:1, 4:5, 5:4, 4:3, 2:3, 3:2, 9:16, 16:9, 1:2, 3:1, 4:1, up to 4 reference images, 7 MB each (PNG, JPEG, WebP) |
 
 Midjourney results also get upscale, vary subtle, vary strong, reroll and zoom out buttons (`mj_upscale`, `mj_low_variation`, `mj_high_variation`, `mj_reroll`, `mj_zoom`). The api.airforce docs don't say what these models expect as input, so each button sends the finished image as a reference along with the original prompt. They're marked experimental in the UI.
-
-Reference images can be up to 7 MB each.
 
 ## Output is always PNG
 
