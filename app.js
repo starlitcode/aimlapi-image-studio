@@ -118,7 +118,6 @@ const GPT_STABLE_PIXELS = 2560 * 1440;
 // Midjourney accepts 1:99 to 99:1, but past 2:1 / 1:2 results get unreliable
 const MJ_MAX_RATIO = 99;
 const MJ_STABLE_RATIO = 2;
-const GPT_QUALITIES = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
 const GPT_BACKGROUNDS = ['auto', 'opaque', 'transparent'];
 const COUNTS = [1, 2, 3, 4];
 
@@ -180,7 +179,6 @@ const els = {
   sizeNote: $('#size-note'),
   resGroup: $('#res-group'),
   size: $('#size'),
-  quality: $('#quality'),
   background: $('#background'),
   dropzone: $('#dropzone'),
   refInput: $('#ref-input'),
@@ -206,7 +204,6 @@ const state = {
   aspect: '1:1',
   resolution: MODELS[0].defaultResolution,
   size: 'auto',
-  quality: 'auto',
   background: 'auto',
   count: 1,
   customAspect: { w: 2, h: 1 },
@@ -371,8 +368,8 @@ function initKey() {
 /* ---------- preferences (non-sensitive, per device) ---------- */
 
 function savePrefs() {
-  const { modelId, aspect, resolution, size, quality, background, count, customAspect, customSize } = state;
-  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, quality, background, count, customAspect, customSize }));
+  const { modelId, aspect, resolution, size, background, count, customAspect, customSize } = state;
+  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, background, count, customAspect, customSize }));
 }
 
 function loadPrefs() {
@@ -387,7 +384,6 @@ function loadPrefs() {
   if (typeof prefs.aspect === 'string') state.aspect = prefs.aspect;
   if (typeof prefs.resolution === 'string') state.resolution = prefs.resolution;
   if (GPT_SIZES.some(([value]) => value === prefs.size)) state.size = prefs.size;
-  if (GPT_QUALITIES.includes(prefs.quality)) state.quality = prefs.quality;
   if (GPT_BACKGROUNDS.includes(prefs.background)) state.background = prefs.background;
   if (COUNTS.includes(prefs.count)) state.count = prefs.count;
   const pair = (value) => value && Number.isInteger(value.w) && Number.isInteger(value.h) && value.w > 0 && value.h > 0;
@@ -554,7 +550,7 @@ function renderPrice() {
     els.priceNote.textContent = 'List price from api.airforce.';
   } else if (model.family === 'gpt' && modelStatus.prices.size) {
     els.price.textContent = 'price varies';
-    els.priceNote.textContent = 'GPT is charged per token, so the cost depends on size and quality.';
+    els.priceNote.textContent = 'GPT is charged per token, so the cost depends on the size.';
   } else {
     // prices haven't loaded (or couldn't), so say nothing rather than guess
     els.price.textContent = '';
@@ -818,7 +814,6 @@ function renderControls() {
   showControl('aspect', Boolean(model.aspectRatios));
   showControl('resolution', Boolean(model.resolutions));
   showControl('size', isGpt);
-  showControl('quality', isGpt);
   showControl('background', isGpt);
 
   if (model.aspectRatios) renderAspects(model);
@@ -846,7 +841,6 @@ function renderControls() {
 function initControls() {
   renderModels();
   fillSelect(els.size, GPT_SIZES, state.size);
-  fillSelect(els.quality, GPT_QUALITIES.map((q) => [q, q]), state.quality);
   fillSelect(els.background, GPT_BACKGROUNDS.map((b) => [b, b]), state.background);
   renderSegmented(els.countGroup, 'count', COUNTS, state.count, (value) => {
     state.count = value;
@@ -877,10 +871,6 @@ function initControls() {
   };
   els.aspectW.addEventListener('input', onAspectInput);
   els.aspectH.addEventListener('input', onAspectInput);
-  els.quality.addEventListener('change', () => {
-    state.quality = els.quality.value;
-    savePrefs();
-  });
   els.background.addEventListener('change', () => {
     state.background = els.background.value;
     savePrefs();
@@ -1081,7 +1071,6 @@ function snapshotJob() {
   if (model.resolutions) params.resolution = state.resolution;
   if (model.family === 'gpt') {
     params.size = resolvedSize();
-    params.quality = state.quality;
     params.background = state.background;
   }
   return {
@@ -1099,18 +1088,18 @@ function buildBody(job) {
     model: job.modelId,
     prompt: job.family === 'mj' || job.family === 'mj-action' ? normalizeMjPrompt(job.prompt) : job.prompt,
     n: 1,
-    // base64 comes back in the response itself, so the image can be re-encoded
-    // to PNG here without depending on the file host allowing cross-origin reads
-    response_format: 'b64_json',
     sse: true,
   };
+  // base64 comes back in the response itself, so the image can be re-encoded to PNG here
+  // without depending on the file host allowing cross-origin reads. api.airforce rejects
+  // the field for GPT Flare, so GPT gets a link instead (served with CORS open).
+  if (job.family !== 'gpt') body.response_format = 'b64_json';
   const p = job.params;
   // api.airforce ignores aspect_ratio for Gemini and returns a square. It reads the shape
   // from size instead, while the model still sets the resolution (2K came back 2752x1536).
   if (p.aspect && job.family === 'gemini') body.size = geminiSize(p.aspect);
   else if (p.aspect) body.aspect_ratio = p.aspect;
   if (p.size && p.size !== 'auto') body.size = p.size;
-  if (p.quality && p.quality !== 'auto') body.quality = p.quality;
   if (p.background && p.background !== 'auto') body.background = p.background;
   if (job.family === 'gpt') body.output_format = 'png';
   if (job.refs.length) body.input_images = job.refs.map((ref) => ({ b64_json: ref.base64 }));
@@ -1399,7 +1388,6 @@ function describeParams(job) {
   if (p.aspect) parts.push(p.aspect);
   if (p.resolution) parts.push(p.resolution);
   if (p.size && p.size !== 'auto') parts.push(p.size);
-  if (p.quality && p.quality !== 'auto') parts.push(`quality ${p.quality}`);
   if (p.background && p.background !== 'auto') parts.push(`${p.background} bg`);
   const refCount = job.refs.length || job.refCount || 0;
   if (refCount) parts.push(`${refCount} ref${refCount > 1 ? 's' : ''}`);
@@ -1949,7 +1937,6 @@ function reuseSettings(card, button) {
         state.customSize = { w, h };
       }
     }
-    if (GPT_QUALITIES.includes(p.quality)) state.quality = p.quality;
     if (GPT_BACKGROUNDS.includes(p.background)) state.background = p.background;
   }
 
@@ -1957,7 +1944,6 @@ function reuseSettings(card, button) {
   syncPromptMirror();
   renderModels();
   els.size.value = state.size;
-  els.quality.value = state.quality;
   els.background.value = state.background;
   els.sizeW.value = String(state.customSize.w);
   els.sizeH.value = String(state.customSize.h);
