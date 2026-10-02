@@ -191,6 +191,28 @@ textarea {
   transform: none;
 }
 
+.primary-btn .price {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.primary-btn .price:empty {
+  display: none;
+}
+
+/* keyboard shortcuts only mean something with a real keyboard and mouse */
+.desktop-only {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .desktop-only {
+    display: inline;
+  }
+}
+
 .primary-btn.small {
   width: auto;
   min-height: 34px;
@@ -779,6 +801,61 @@ select:hover {
   margin-top: var(--space-1);
 }
 
+/* ---------- prompt history ---------- */
+
+.history {
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.history-list {
+  max-height: 280px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.history-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.history-item {
+  display: -webkit-box;
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  font-size: var(--text-sm);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.history-item:hover {
+  background: var(--accent-soft);
+}
+
+.history-empty {
+  padding: var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.history-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
 /* ---------- references ---------- */
 
 .dropzone {
@@ -985,6 +1062,16 @@ select:hover {
 
 .gallery-head .label {
   margin: 0;
+}
+
+.saved-line {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.saved-line:empty {
+  display: none;
 }
 
 .gallery {
@@ -1344,6 +1431,18 @@ select:hover {
 @media (max-width: 480px) {
   .brand-sub {
     display: none;
+  }
+
+  .card-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .card-actions > * {
+    min-width: 0;
+    padding: var(--space-1) var(--space-2);
+    white-space: normal;
+    text-align: center;
   }
 
   .key-prefix {

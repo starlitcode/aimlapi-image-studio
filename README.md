@@ -27,7 +27,14 @@ Every result is a PNG. When a provider sends back JPEG or WebP, the page decodes
 2. Paste your `sk-air-...` key into the key panel and save it.
 3. Pick a model, write a prompt, generate.
 
-Results only exist in the open tab, so download the ones you want to keep.
+Finished images are saved in your browser (IndexedDB), so they're still there after a refresh. The line under "results" shows how many are saved and how much space they use. If storage fills up, the oldest saved images are dropped first. Removing an image or pressing clear deletes it from the device too. Reference images aren't saved.
+
+Other things on the page:
+
+- The generate button shows the price before you spend anything, using api.airforce's list price per image times how many you're making. GPT models are charged per token, so they show a note instead of a price.
+- "reuse settings" on any result (including failed ones) puts its prompt, model, aspect ratio, size and resolution back into the form.
+- Pasting an image anywhere on the page adds it as a reference image.
+- "history" next to the prompt keeps your last 20 prompts on this device. Clearing it asks first.
 
 ## Your API key
 

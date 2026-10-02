@@ -27,6 +27,13 @@ const MB = 1024 * 1024;
 const STORAGE_KEY = 'airforce-image-studio:key';
 const STORAGE_THEME = 'airforce-image-studio:theme';
 const STORAGE_PREFS = 'airforce-image-studio:prefs';
+const STORAGE_HISTORY = 'airforce-image-studio:history';
+const HISTORY_LIMIT = 20;
+
+// Finished images are kept in IndexedDB so they survive a reload. Each record holds the
+// PNG blob and the settings that made it, never the key and never reference images.
+const DB_NAME = 'airforce-image-studio';
+const DB_STORE = 'results';
 
 const BASIC_REF_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
@@ -147,6 +154,14 @@ const els = {
   statusText: $('#status-text'),
   statusRefresh: $('#status-refresh'),
   prompt: $('#prompt'),
+  historyToggle: $('#history-toggle'),
+  historyPanel: $('#history-panel'),
+  historyList: $('#history-list'),
+  historyClear: $('#history-clear'),
+  refsNote: $('#refs-note'),
+  price: $('#price'),
+  priceNote: $('#price-note'),
+  savedLine: $('#saved-line'),
   promptMirror: $('#prompt-mirror'),
   aspectGrid: $('#aspect-grid'),
   aspectCustom: $('#aspect-custom'),
@@ -198,7 +213,11 @@ const cards = new Map();
 
 // answered: null before the first check, true once api.airforce replied, false if the
 // latest check failed. A failed check keeps the last good statuses instead of wiping them.
-const modelStatus = { byId: new Map(), checkedAt: 0, answered: null, loading: false };
+const modelStatus = { byId: new Map(), prices: new Map(), checkedAt: 0, answered: null, loading: false };
+
+// saved.available: null until IndexedDB has been tried, then true or false.
+// saved.bytes maps each saved record id to its image size, for the "saved on this device" line.
+const saved = { available: null, bytes: new Map(), full: false };
 
 /* ---------- storage (any of these can throw in private mode or when blocked) ---------- */
 
@@ -470,6 +489,29 @@ function renderStatus() {
     : look.tone === 'warn' ? `api.airforce lists ${model.name} as ${look.label} right now. It may be slow or fail.`
     : '';
   showNote(els.modelWarning, look.tone === 'bad' ? { error: warning } : { warning });
+  renderPrice();
+}
+
+// api.airforce's models page shows pricepermilliontokens / 100,000 as the per-image price.
+// Token-priced models (GPT) have no fixed price per image, so they return null.
+function priceOf(entry) {
+  const table = entry.customer_price_table;
+  if (!table || table.summary_unit !== 'per_request') return null;
+  const value = Number(entry.pricepermilliontokens);
+  return Number.isFinite(value) && value > 0 ? value / 100000 : null;
+}
+
+function renderPrice() {
+  const model = currentModel();
+  const price = modelStatus.prices.get(sendModelId(model));
+  if (typeof price === 'number') {
+    const total = price * state.count;
+    els.price.textContent = state.count > 1 ? `~$${total.toFixed(2)} for ${state.count}` : `~$${total.toFixed(2)}`;
+    els.priceNote.textContent = 'List price from api.airforce.';
+  } else {
+    els.price.textContent = '';
+    els.priceNote.textContent = model.family === 'gpt' && modelStatus.prices.size ? 'GPT is charged per token, so the price varies.' : '';
+  }
 }
 
 async function refreshStatus() {
@@ -486,9 +528,9 @@ async function refreshStatus() {
       ...MODELS.flatMap((m) => [m.id, ...Object.values(m.resolutionModels || {})]),
       ...MJ_ACTIONS.map((a) => a.model),
     ]);
-    modelStatus.byId = new Map(
-      list.filter((m) => m && wanted.has(m.id)).map((m) => [m.id, typeof m.status === 'string' ? m.status : '']),
-    );
+    const entries = list.filter((m) => m && wanted.has(m.id));
+    modelStatus.byId = new Map(entries.map((m) => [m.id, typeof m.status === 'string' ? m.status : '']));
+    modelStatus.prices = new Map(entries.map((m) => [m.id, priceOf(m)]));
     modelStatus.checkedAt = Date.now();
     modelStatus.answered = true;
   } catch (_) {
@@ -756,6 +798,7 @@ function initControls() {
   renderSegmented(els.countGroup, 'count', COUNTS, state.count, (value) => {
     state.count = value;
     savePrefs();
+    renderPrice();
   });
 
   els.size.addEventListener('change', () => {
@@ -815,6 +858,10 @@ function setRefsError(messages) {
   els.refsError.textContent = messages.join(' ');
 }
 
+function setRefsNote(text) {
+  els.refsNote.textContent = text;
+}
+
 function refProblems(model = currentModel()) {
   const problems = [];
   if (state.refs.length > model.maxRefs) {
@@ -854,6 +901,7 @@ async function addRefBlob(blob, name) {
 }
 
 async function addRefFiles(fileList) {
+  setRefsNote('');
   const errors = [];
   for (const file of Array.from(fileList)) {
     const error = await addRefBlob(file, file.name);
@@ -871,6 +919,7 @@ function removeRef(id) {
   if (!ref) return;
   URL.revokeObjectURL(ref.previewUrl);
   state.refs = state.refs.filter((r) => r.id !== id);
+  setRefsNote('');
   renderRefs();
   setRefsError(refProblems());
 }
@@ -915,6 +964,19 @@ function initRefs() {
     const files = els.refInput.files;
     if (files && files.length) await addRefFiles(files);
     els.refInput.value = '';
+  });
+
+  // An image pasted anywhere on the page (Ctrl+V, or the keyboard's paste on a phone)
+  // becomes a reference. Text pastes are left alone.
+  document.addEventListener('paste', async (event) => {
+    if (event.target === els.keyInput) return;
+    const files = Array.from((event.clipboardData && event.clipboardData.files) || []).filter((file) => fileType(file).startsWith('image/'));
+    if (!files.length) return;
+    event.preventDefault();
+    const before = state.refs.length;
+    await addRefFiles(files);
+    const added = state.refs.length - before;
+    if (added) setRefsNote(added === 1 ? 'Pasted image added as a reference.' : `${added} pasted images added as references.`);
   });
 
   els.dropzone.addEventListener('dragover', (event) => {
@@ -1274,7 +1336,8 @@ function describeParams(job) {
   if (p.size && p.size !== 'auto') parts.push(p.size);
   if (p.quality && p.quality !== 'auto') parts.push(`quality ${p.quality}`);
   if (p.background && p.background !== 'auto') parts.push(`${p.background} bg`);
-  if (job.refs.length) parts.push(`${job.refs.length} ref${job.refs.length > 1 ? 's' : ''}`);
+  const refCount = job.refs.length || job.refCount || 0;
+  if (refCount) parts.push(`${refCount} ref${refCount > 1 ? 's' : ''}`);
   return parts.join(' · ');
 }
 
@@ -1312,6 +1375,7 @@ function createCard(job) {
   card.q('.card-copy').addEventListener('click', () => copyPrompt(card));
   card.q('.card-report-copy').addEventListener('click', () => copyReport(card));
   card.q('.card-ref').addEventListener('click', () => useAsReference(card));
+  for (const button of node.querySelectorAll('.card-reuse')) button.addEventListener('click', () => reuseSettings(card, button));
 
   card.q('.card-mj-buttons').replaceChildren(
     ...MJ_ACTIONS.map((action) => {
@@ -1437,9 +1501,11 @@ async function runCard(card) {
   }
 }
 
-function showResult(card, png, tookMs) {
+function showResult(card, png, tookMs, restored = false) {
   if (card.objectUrl) URL.revokeObjectURL(card.objectUrl);
   card.result = png;
+  card.tookMs = tookMs;
+  if (!card.createdAt) card.createdAt = Date.now();
   card.objectUrl = URL.createObjectURL(png.blob);
 
   const img = card.q('.card-open img');
@@ -1447,7 +1513,7 @@ function showResult(card, png, tookMs) {
   img.alt = card.job.prompt;
   card.node.style.setProperty('--ar', String(png.width / png.height));
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const stamp = new Date(card.createdAt).toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const download = card.q('.card-download');
   download.href = card.objectUrl;
   download.download = `${card.job.modelId}-${stamp}.png`;
@@ -1455,6 +1521,7 @@ function showResult(card, png, tookMs) {
   const converted = png.format === 'png' ? '' : ` · converted from ${png.format}`;
   card.q('.card-info').textContent = `${describeParams(card.job)} · ${png.width}×${png.height} png${converted} · ${formatElapsed(tookMs)}`;
   setCardState(card, 'done');
+  if (!restored) saveResult(card);
 }
 
 // The checklist api.airforce asks for in a support ticket. It never includes the key or the prompt.
@@ -1538,6 +1605,7 @@ function removeCard(card) {
   if (card.objectUrl) URL.revokeObjectURL(card.objectUrl);
   card.node.remove();
   cards.delete(card.id);
+  if (card.savedId) forgetSaved(card.savedId);
   updateGalleryChrome();
 }
 
@@ -1616,6 +1684,293 @@ function initViewer() {
   });
 }
 
+/* ---------- saved results (IndexedDB) ---------- */
+
+let dbPromise = null;
+
+function openDb() {
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve, reject) => {
+      let request;
+      try {
+        request = indexedDB.open(DB_NAME, 1);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE, { keyPath: 'id' });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error('blocked'));
+    });
+    dbPromise.catch(() => {
+      dbPromise = null;
+    });
+  }
+  return dbPromise;
+}
+
+async function dbRun(mode, action) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, mode);
+    const request = action(tx.objectStore(DB_STORE));
+    tx.oncomplete = () => resolve(request ? request.result : undefined);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('aborted'));
+  });
+}
+
+function newSavedId() {
+  const random = new Uint32Array(2);
+  crypto.getRandomValues(random);
+  return `${Date.now().toString(36)}-${random[0].toString(36)}${random[1].toString(36)}`;
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1024 * MB) return `${(bytes / (1024 * MB)).toFixed(1)} GB`;
+  if (bytes >= MB) return `${Math.round(bytes / MB)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function renderSavedLine() {
+  if (saved.available === false) {
+    els.savedLine.textContent = "This browser won't let the page save images, so results disappear when you close the tab.";
+    return;
+  }
+  const count = saved.bytes.size;
+  if (!count) {
+    els.savedLine.textContent = '';
+    return;
+  }
+  const total = Array.from(saved.bytes.values()).reduce((sum, size) => sum + size, 0);
+  const full = saved.full ? ' · storage full, oldest images were dropped' : '';
+  els.savedLine.textContent = `${count} saved on this device · ${formatBytes(total)}${full}`;
+}
+
+async function saveResult(card) {
+  const record = {
+    id: newSavedId(),
+    createdAt: card.createdAt,
+    blob: card.result.blob,
+    width: card.result.width,
+    height: card.result.height,
+    format: card.result.format,
+    tookMs: card.tookMs,
+    job: {
+      modelId: card.job.modelId,
+      modelName: card.job.modelName,
+      family: card.job.family,
+      prompt: card.job.prompt,
+      params: card.job.params,
+      refCount: card.job.refs.length || card.job.refCount || 0,
+    },
+  };
+  // When storage is full, drop the oldest saved images (they stay on screen for now) and try again.
+  for (;;) {
+    try {
+      await dbRun('readwrite', (store) => store.put(record));
+      if (!cards.has(card.id)) {
+        await dbRun('readwrite', (store) => store.delete(record.id)).catch(() => {});
+        return;
+      }
+      card.savedId = record.id;
+      saved.available = true;
+      saved.bytes.set(record.id, record.blob.size);
+      renderSavedLine();
+      return;
+    } catch (err) {
+      if (!err || err.name !== 'QuotaExceededError') {
+        saved.available = false;
+        renderSavedLine();
+        return;
+      }
+      const oldest = Array.from(cards.values())
+        .filter((other) => other.savedId && other !== card)
+        .sort((a, b) => a.createdAt - b.createdAt)[0];
+      saved.full = true;
+      if (!oldest) {
+        card.q('.card-info').textContent += ' · not saved, storage is full';
+        renderSavedLine();
+        return;
+      }
+      await forgetSaved(oldest.savedId);
+      oldest.savedId = null;
+    }
+  }
+}
+
+async function forgetSaved(id) {
+  saved.bytes.delete(id);
+  renderSavedLine();
+  try {
+    await dbRun('readwrite', (store) => store.delete(id));
+  } catch (_) {
+    /* already gone or storage unavailable; nothing else to clean up */
+  }
+}
+
+async function restoreSaved() {
+  let records;
+  try {
+    records = await dbRun('readonly', (store) => store.getAll());
+    saved.available = true;
+  } catch (_) {
+    saved.available = false;
+    renderSavedLine();
+    return;
+  }
+  records
+    .filter((record) => record && record.blob instanceof Blob && record.job && typeof record.job.modelId === 'string')
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .forEach((record) => {
+      const card = createCard({ ...record.job, params: record.job.params || {}, refs: [] });
+      card.savedId = record.id;
+      card.createdAt = record.createdAt;
+      saved.bytes.set(record.id, record.blob.size);
+      showResult(card, { blob: record.blob, width: record.width, height: record.height, format: record.format }, record.tookMs || 0, true);
+    });
+  renderSavedLine();
+}
+
+/* ---------- reuse a result's settings ---------- */
+
+function pickerFor(job) {
+  if (job.family === 'mj-action') return { model: MODELS.find((m) => m.id === 'mj_imagine'), resolution: null };
+  for (const model of MODELS) {
+    if (model.id === job.modelId) return { model, resolution: job.params.resolution || null };
+    const match = Object.entries(model.resolutionModels || {}).find(([, id]) => id === job.modelId);
+    if (match) return { model, resolution: match[0] };
+  }
+  return null;
+}
+
+function reuseSettings(card, button) {
+  const { job } = card;
+  const pick = pickerFor(job);
+  if (!pick) {
+    flashButton(button, 'model not available');
+    return;
+  }
+  const { model } = pick;
+  const p = job.params || {};
+  state.modelId = model.id;
+  if (pick.resolution && model.resolutions && model.resolutions.includes(pick.resolution)) state.resolution = pick.resolution;
+  if (p.aspect && model.aspectRatios) {
+    if (model.aspectRatios.includes(p.aspect)) {
+      state.aspect = p.aspect;
+    } else if (model.customAspect) {
+      const { w, h } = ratioParts(p.aspect);
+      if (w && h) {
+        state.aspect = 'custom';
+        state.customAspect = { w, h };
+      }
+    }
+  }
+  if (model.family === 'gpt') {
+    if (p.size && GPT_SIZES.some(([value]) => value === p.size)) {
+      state.size = p.size;
+    } else if (p.size) {
+      const [w, h] = p.size.split('x').map(wholeNumber);
+      if (w && h) {
+        state.size = 'custom';
+        state.customSize = { w, h };
+      }
+    }
+    if (GPT_QUALITIES.includes(p.quality)) state.quality = p.quality;
+    if (GPT_BACKGROUNDS.includes(p.background)) state.background = p.background;
+  }
+
+  els.prompt.value = job.prompt;
+  syncPromptMirror();
+  renderModels();
+  els.size.value = state.size;
+  els.quality.value = state.quality;
+  els.background.value = state.background;
+  els.sizeW.value = String(state.customSize.w);
+  els.sizeH.value = String(state.customSize.h);
+  renderControls();
+  renderStatus();
+  savePrefs();
+  clearFormError();
+
+  const refCount = job.refs.length || job.refCount || 0;
+  setRefsNote(refCount ? `The original used ${refCount} reference image${refCount > 1 ? 's' : ''}. Add ${refCount > 1 ? 'them' : 'it'} again if you want ${refCount > 1 ? 'them' : 'it'}.` : '');
+  flashButton(button, 'settings loaded');
+  if (window.matchMedia('(max-width: 959px)').matches) els.form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ---------- prompt history ---------- */
+
+function loadHistory() {
+  try {
+    const list = JSON.parse(storageGet('localStorage', STORAGE_HISTORY) || '[]');
+    return Array.isArray(list) ? list.filter((p) => typeof p === 'string' && p.trim()).slice(0, HISTORY_LIMIT) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function rememberPrompt(prompt) {
+  const list = [prompt, ...loadHistory().filter((p) => p !== prompt)].slice(0, HISTORY_LIMIT);
+  storageSet('localStorage', STORAGE_HISTORY, JSON.stringify(list));
+  if (!els.historyPanel.hidden) renderHistory();
+}
+
+function renderHistory() {
+  const list = loadHistory();
+  els.historyClear.hidden = !list.length;
+  if (!list.length) {
+    const empty = document.createElement('li');
+    empty.className = 'history-empty';
+    empty.textContent = 'No prompts yet. Each prompt you generate with is saved here.';
+    els.historyList.replaceChildren(empty);
+    return;
+  }
+  els.historyList.replaceChildren(
+    ...list.map((prompt) => {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'history-item';
+      button.title = prompt;
+      renderPrompt(button, prompt);
+      button.addEventListener('click', () => {
+        els.prompt.value = prompt;
+        syncPromptMirror();
+        clearFormError();
+        setHistoryOpen(false);
+        // focusing on a phone pops the keyboard over the page, so only do it with a mouse
+        if (window.matchMedia('(pointer: fine)').matches) els.prompt.focus();
+      });
+      item.append(button);
+      return item;
+    }),
+  );
+}
+
+function setHistoryOpen(open) {
+  if (open) renderHistory();
+  els.historyPanel.hidden = !open;
+  els.historyToggle.setAttribute('aria-expanded', String(open));
+  els.historyToggle.textContent = open ? 'close history' : 'history';
+}
+
+function initHistory() {
+  els.historyToggle.addEventListener('click', () => setHistoryOpen(els.historyPanel.hidden));
+  els.historyClear.addEventListener('click', () => {
+    if (!window.confirm('Clear your prompt history on this device?')) return;
+    storageRemove('localStorage', STORAGE_HISTORY);
+    renderHistory();
+  });
+  els.historyPanel.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      setHistoryOpen(false);
+      els.historyToggle.focus();
+    }
+  });
+}
+
 /* ---------- generate ---------- */
 
 function clearFormError() {
@@ -1647,6 +2002,7 @@ function initGenerate() {
     els.formError.textContent = problem;
     if (problem) return;
     const job = snapshotJob();
+    rememberPrompt(job.prompt);
     for (let i = 0; i < state.count; i++) runCard(createCard(job));
     if (window.matchMedia('(max-width: 959px)').matches) {
       els.gallery.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1664,9 +2020,15 @@ function initGenerate() {
 
   els.clearGallery.addEventListener('click', () => {
     const pending = Array.from(cards.values()).some((card) => card.controller);
-    const message = pending ? 'Clear all results? Images still generating will be cancelled.' : 'Clear all results? Download anything you want to keep first.';
+    const message = pending
+      ? 'Clear all results? Images still generating will be cancelled, and saved images are deleted from this device.'
+      : 'Clear all results? They are deleted from this device too, so download anything you want to keep first.';
     if (!window.confirm(message)) return;
     for (const card of Array.from(cards.values())) removeCard(card);
+    saved.full = false;
+    dbRun('readwrite', (store) => store.clear()).catch(() => {});
+    saved.bytes.clear();
+    renderSavedLine();
   });
 }
 
@@ -1678,5 +2040,7 @@ initStatus();
 initPrompt();
 initRefs();
 initViewer();
+initHistory();
 initGenerate();
 updateGalleryChrome();
+restoreSaved();
