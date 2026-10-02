@@ -208,6 +208,8 @@ const els = {
   gallery: $('#gallery'),
   empty: $('#empty'),
   clearGallery: $('#clear-gallery'),
+  upscaleOwn: $('#upscale-own'),
+  upscaleFile: $('#upscale-file'),
   viewer: $('#viewer'),
   viewerImg: $('#viewer-img'),
   viewerClose: $('#viewer-close'),
@@ -1518,6 +1520,7 @@ function optionText(options, value) {
 
 function describeParams(job) {
   const p = job.params;
+  if (job.family === 'import') return ['your image', p.name].filter(Boolean).join(' · ');
   if (job.family === 'upscale') {
     return ['bigjpg', optionText(UPSCALE_SCALES, p.x2), optionText(UPSCALE_STYLES, p.style), optionText(UPSCALE_NOISE, p.noise)].join(' · ');
   }
@@ -1556,6 +1559,7 @@ function createCard(job) {
   card.q('.card-info').textContent = describeParams(job);
   node.classList.toggle('is-mj', job.family === 'mj' || job.family === 'mj-action');
   node.classList.toggle('is-upscale', job.family === 'upscale');
+  node.classList.toggle('is-import', job.family === 'import');
 
   card.q('.card-cancel').addEventListener('click', () => {
     if (card.controller && window.confirm('Stop generating this image?')) card.controller.abort();
@@ -1745,8 +1749,10 @@ function showResult(card, png, tookMs, restored = false) {
   download.textContent = `download ${ext}`;
 
   const converted = isPng && png.format !== 'png' ? ` · converted from ${png.format}` : '';
-  const kept = isPng ? '' : ' · kept as sent, couldn\'t convert here';
-  card.q('.card-info').textContent = `${describeParams(card.job)} · ${png.width}×${png.height} ${ext}${converted}${kept} · ${formatElapsed(tookMs)}`;
+  const imported = card.job.family === 'import';
+  const kept = isPng || imported ? '' : ' · kept as sent, couldn\'t convert here';
+  const took = imported ? '' : ` · ${formatElapsed(tookMs)}`;
+  card.q('.card-info').textContent = `${describeParams(card.job)} · ${png.width}×${png.height} ${ext}${converted}${kept}${took}`;
   renderUpscaleNote(card);
   setCardState(card, 'done');
   if (!restored) saveResult(card);
@@ -1899,6 +1905,36 @@ async function runMjAction(card, action) {
 }
 
 /* ---------- bigjpg upscaling ---------- */
+
+// An image from the device becomes a card of its own, kept exactly as it was, so it can be
+// upscaled like a generated one.
+async function importForUpscale(files) {
+  for (const file of files) {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      window.alert(`${file.name} isn't a PNG, JPEG or WebP image, so it can't be upscaled.`);
+      continue;
+    }
+    let img;
+    try {
+      img = await loadImage(file);
+    } catch (_) {
+      window.alert(`${file.name} couldn't be opened as an image.`);
+      continue;
+    }
+    const format = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' }[file.type];
+    const card = createCard({ modelId: 'your-image', modelName: 'your image', family: 'import', prompt: '', params: { name: file.name }, refs: [] });
+    showResult(card, { blob: file, width: img.naturalWidth, height: img.naturalHeight, format }, 0);
+  }
+}
+
+function initUpscaleOwn() {
+  els.upscaleOwn.addEventListener('click', () => els.upscaleFile.click());
+  els.upscaleFile.addEventListener('change', async () => {
+    const files = Array.from(els.upscaleFile.files || []);
+    els.upscaleFile.value = '';
+    await importForUpscale(files);
+  });
+}
 
 function timeoutFor(job) {
   return job.family === 'upscale' ? UPSCALE_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
@@ -2397,6 +2433,7 @@ loadPrefs();
 initTheme();
 initKey();
 initUpscaler();
+initUpscaleOwn();
 initControls();
 initStatus();
 initPrompt();

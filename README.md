@@ -27,7 +27,7 @@ Finished images can be enlarged with [bigjpg](https://bigjpg.com) (needs a bigjp
 
 To set it up, create a Worker in Cloudflare, paste in `worker/bigjpg-proxy.js`, and add two secrets: `BIGJPG_KEY` (from bigjpg's API page, without the `X-API-KEY:` part) and `PROXY_PASSWORD`. Then open the key panel on the page and fill in the Worker's address and password under "bigjpg upscaler". Saving checks them with the Worker first, which doesn't use a bigjpg API call.
 
-After that, every finished image has an upscale row: artwork or photo, 2x to 16x, and noise reduction, with the resulting size shown. Each upscale uses one bigjpg API call (checking on progress doesn't use any) and shows up as its own card. Both of bigjpg's styles come back as JPEG through the API, so the card says "converted from jpeg".
+After that, every finished image has an upscale row, and "upscale my image" above the results lets you pick images from your device (PNG, JPEG or WebP) to upscale the same way. A picked image shows up as a card exactly as it was, with the same row: artwork or photo, 2x to 16x, and noise reduction, with the resulting size shown. Each upscale uses one bigjpg API call (checking on progress doesn't use any) and shows up as its own card. Both of bigjpg's styles come back as JPEG through the API, so the card says "converted from jpeg".
 
 ## Using it
 

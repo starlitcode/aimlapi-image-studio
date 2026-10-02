@@ -1085,14 +1085,31 @@ select:hover {
 
 .gallery-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
   min-height: 34px;
   margin-bottom: var(--space-3);
 }
 
 .gallery-head .label {
   margin: 0;
+}
+
+.gallery-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* picks an image from the device to upscale; only useful once the upscaler is set up */
+.upscale-own {
+  display: none;
+}
+
+.has-upscaler .upscale-own {
+  display: inline-flex;
 }
 
 .saved-line {
@@ -1422,8 +1439,10 @@ select:hover {
   margin: var(--space-2) 0 0;
 }
 
-/* an upscale has no generator settings to load back into the form */
-.card.is-upscale .card-reuse {
+/* upscales and images picked from the device have no generator settings or prompt to reuse */
+.card.is-upscale .card-reuse,
+.card.is-import .card-reuse,
+.card.is-import .card-copy {
   display: none;
 }
 
