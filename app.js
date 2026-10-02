@@ -355,6 +355,7 @@ function initKey() {
   });
 
   els.keyForget.addEventListener('click', () => {
+    if (!window.confirm("Forget your API key on this browser? You'll need to paste it again to generate.")) return;
     storageRemove('localStorage', STORAGE_KEY);
     storageRemove('sessionStorage', STORAGE_KEY);
     state.apiKey = '';
@@ -994,7 +995,9 @@ function renderRefs() {
       remove.className = 'ref-remove';
       remove.setAttribute('aria-label', `Remove ${ref.name}`);
       remove.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>';
-      remove.addEventListener('click', () => removeRef(ref.id));
+      remove.addEventListener('click', () => {
+        if (window.confirm('Remove this reference image?')) removeRef(ref.id);
+      });
       item.append(img, badge, remove);
       return item;
     }),
@@ -1418,10 +1421,16 @@ function createCard(job) {
   card.q('.card-info').textContent = describeParams(job);
   node.classList.toggle('is-mj', job.family === 'mj' || job.family === 'mj-action');
 
-  card.q('.card-cancel').addEventListener('click', () => card.controller && card.controller.abort());
+  card.q('.card-cancel').addEventListener('click', () => {
+    if (card.controller && window.confirm('Stop generating this image?')) card.controller.abort();
+  });
   card.q('.card-retry').addEventListener('click', () => runCard(card));
-  card.q('.card-dismiss').addEventListener('click', () => removeCard(card));
-  card.q('.card-remove').addEventListener('click', () => removeWithUndo(card));
+  card.q('.card-dismiss').addEventListener('click', () => {
+    if (confirmCardRemoval(card)) removeCard(card);
+  });
+  card.q('.card-remove').addEventListener('click', () => {
+    if (confirmCardRemoval(card)) removeWithUndo(card);
+  });
   card.q('.card-undo-btn').addEventListener('click', () => undoRemove(card));
   card.q('.card-open').addEventListener('click', () => openViewer(card));
   card.q('.card-copy').addEventListener('click', () => copyPrompt(card));
@@ -1626,6 +1635,11 @@ function showFailure(card, info, report) {
   }
   setCardState(card, 'failed');
   if (info.openKey) setKeyPanelOpen(true);
+}
+
+function confirmCardRemoval(card) {
+  if (card.result) return window.confirm('Remove this image? It gets deleted from this device too.');
+  return window.confirm('Remove this card? The error details go with it.');
 }
 
 // A finished image isn't deleted straight away: the card collapses to an undo bar first,

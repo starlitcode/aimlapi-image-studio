@@ -27,7 +27,7 @@ Every result is a PNG. When a provider sends back JPEG or WebP, the page decodes
 2. Paste your `sk-air-...` key into the key panel and save it.
 3. Pick a model, write a prompt, generate.
 
-Finished images are saved in your browser (IndexedDB), so they're still there after a refresh. The line under "results" shows how many are saved and how much space they use. If storage fills up, the oldest saved images are dropped first. Removing an image or pressing clear deletes it from the device too. Reference images aren't saved.
+Finished images are saved in your browser (IndexedDB), so they're still there after a refresh. The line under "results" shows how many are saved and how much space they use. If storage fills up, the oldest saved images are dropped first. Removing an image or pressing clear deletes it from the device too, and both ask first. Reference images aren't saved.
 
 Other things on the page:
 
@@ -47,7 +47,7 @@ Don't tick "remember" on a shared computer.
 
 ## Notes
 
-- Requests use `sse: true` so long renders don't get cut off by proxy timeouts. If nothing comes back after 6 minutes, the request is dropped. You can also cancel a pending image yourself with its cancel button. Removing a finished image with ✕ gives you 8 seconds to undo before it's gone.
+- Requests use `sse: true` so long renders don't get cut off by proxy timeouts. If nothing comes back after 6 minutes, the request is dropped. You can also cancel a pending image yourself with its cancel button. Anything that deletes, clears or cancels asks first: removing an image, a failed card or a reference image, clearing results or history, forgetting the key, and cancelling. After you confirm removing a finished image with ✕, you still get 8 seconds to undo.
 - Each model shows its live status from api.airforce's public model list (up, slow, partial outage, major outage or down). The page checks when it opens, every 5 minutes while the tab is open, after a failed image, and when you press refresh. It warns you before you use a model that's listed as down. The list doesn't need a key, so the key isn't sent with it.
 - When the model's provider fails (a 502 or 503, or a failure reported inside an otherwise successful response), the page tries again on its own: after 3 seconds, then after 8. The card says when it's retrying, and other errors are never retried.
 - Error messages follow api.airforce's [troubleshooting guide](https://api.airforce/docs/troubleshooting/). Each one says what failed and what to try next. API and network errors also have a "details for a bug report" box with the fields their support asks for: time in UTC, endpoint, model, status, error body and the request's trace id. Your key and your prompt are never included.
