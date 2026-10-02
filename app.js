@@ -1088,12 +1088,11 @@ function buildBody(job) {
     model: job.modelId,
     prompt: job.family === 'mj' || job.family === 'mj-action' ? normalizeMjPrompt(job.prompt) : job.prompt,
     n: 1,
+    // base64 comes back in the response itself, so the image can be re-encoded
+    // to PNG here without depending on the file host allowing cross-origin reads
+    response_format: 'b64_json',
     sse: true,
   };
-  // base64 comes back in the response itself, so the image can be re-encoded to PNG here
-  // without depending on the file host allowing cross-origin reads. api.airforce rejects
-  // the field for GPT Flare, so GPT gets a link instead (served with CORS open).
-  if (job.family !== 'gpt') body.response_format = 'b64_json';
   const p = job.params;
   // api.airforce ignores aspect_ratio for Gemini and returns a square. It reads the shape
   // from size instead, while the model still sets the resolution (2K came back 2752x1536).
