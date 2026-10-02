@@ -32,12 +32,19 @@ const BASIC_REF_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
 const MODELS = [
   {
-    id: 'gemini-3.1-flash-image',
+    id: 'gemini-3.1-flash-image-preview',
     name: 'Gemini 3.1 Flash Image',
     note: 'Google. Up to 14 reference images, resolution up to 4K.',
     family: 'gemini',
     aspectRatios: ['1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9', '9:21', '1:4', '4:1', '1:8', '8:1'],
-    resolutions: ['512', '1K', '2K', '4K'],
+    resolutions: ['1K', '2K', '4K'],
+    // On api.airforce each resolution is its own model, and a "resolution" field in the
+    // request gets the call rejected. The plain model is 1K; there is no 512 model.
+    resolutionModels: {
+      '1K': 'gemini-3.1-flash-image-preview',
+      '2K': 'gemini-3.1-flash-image-preview-2k',
+      '4K': 'gemini-3.1-flash-image-preview-4k',
+    },
     defaultResolution: '1K',
     maxRefs: 14,
     maxRefMB: 7,
@@ -440,7 +447,8 @@ function timeAgo(ms) {
 
 function renderStatus() {
   for (const pill of els.modelList.querySelectorAll('.model-status')) {
-    const look = statusOf(pill.dataset.model);
+    const option = MODELS.find((m) => m.id === pill.dataset.model);
+    const look = statusOf(option ? sendModelId(option) : pill.dataset.model);
     pill.textContent = look.label;
     pill.className = `model-status is-${look.tone}`;
   }
@@ -457,7 +465,7 @@ function renderStatus() {
   els.statusRefresh.disabled = modelStatus.loading;
 
   const model = currentModel();
-  const look = statusOf(model.id);
+  const look = statusOf(sendModelId(model));
   const warning = look.tone === 'bad' ? `api.airforce lists ${model.name} as ${look.label} right now, so it will probably fail.`
     : look.tone === 'warn' ? `api.airforce lists ${model.name} as ${look.label} right now. It may be slow or fail.`
     : '';
@@ -474,7 +482,10 @@ async function refreshStatus() {
     const payload = await response.json();
     const list = payload && Array.isArray(payload.data) ? payload.data : null;
     if (!list) throw new Error('unexpected shape');
-    const wanted = new Set([...MODELS.map((m) => m.id), ...MJ_ACTIONS.map((a) => a.model)]);
+    const wanted = new Set([
+      ...MODELS.flatMap((m) => [m.id, ...Object.values(m.resolutionModels || {})]),
+      ...MJ_ACTIONS.map((a) => a.model),
+    ]);
     modelStatus.byId = new Map(
       list.filter((m) => m && wanted.has(m.id)).map((m) => [m.id, typeof m.status === 'string' ? m.status : '']),
     );
@@ -727,6 +738,7 @@ function renderControls() {
     renderSegmented(els.resGroup, 'resolution', model.resolutions, state.resolution, (value) => {
       state.resolution = value;
       savePrefs();
+      renderStatus();
     });
   }
 
@@ -942,6 +954,11 @@ class StudioError extends Error {
   }
 }
 
+// The model ID a request for this picker option will actually use.
+function sendModelId(model) {
+  return (model.resolutionModels && model.resolutionModels[state.resolution]) || model.id;
+}
+
 function snapshotJob() {
   const model = currentModel();
   const params = {};
@@ -953,7 +970,7 @@ function snapshotJob() {
     params.background = state.background;
   }
   return {
-    modelId: model.id,
+    modelId: sendModelId(model),
     modelName: model.name,
     family: model.family,
     prompt: els.prompt.value.trim(),
@@ -974,7 +991,6 @@ function buildBody(job) {
   };
   const p = job.params;
   if (p.aspect) body.aspect_ratio = p.aspect;
-  if (p.resolution) body.resolution = p.resolution;
   if (p.size && p.size !== 'auto') body.size = p.size;
   if (p.quality && p.quality !== 'auto') body.quality = p.quality;
   if (p.background && p.background !== 'auto') body.background = p.background;
