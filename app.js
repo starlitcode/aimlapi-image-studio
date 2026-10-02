@@ -4,6 +4,8 @@ const API_URL = 'https://api.airforce/v1/images/generations';
 
 // Long renders (4K, high quality) can take minutes. Past this the request is dropped.
 const REQUEST_TIMEOUT_MS = 6 * 60 * 1000;
+// How long a removed image can still be brought back
+const UNDO_SECONDS = 8;
 const MB = 1024 * 1024;
 
 const STORAGE_KEY = 'airforce-image-studio:key';
@@ -1150,7 +1152,8 @@ function createCard(job) {
   card.q('.card-cancel').addEventListener('click', () => card.controller && card.controller.abort());
   card.q('.card-retry').addEventListener('click', () => runCard(card));
   card.q('.card-dismiss').addEventListener('click', () => removeCard(card));
-  card.q('.card-remove').addEventListener('click', () => removeCard(card));
+  card.q('.card-remove').addEventListener('click', () => removeWithUndo(card));
+  card.q('.card-undo-btn').addEventListener('click', () => undoRemove(card));
   card.q('.card-open').addEventListener('click', () => openViewer(card));
   card.q('.card-copy').addEventListener('click', () => copyPrompt(card));
   card.q('.card-report-copy').addEventListener('click', () => copyReport(card));
@@ -1285,8 +1288,38 @@ function showFailure(card, info, report) {
   if (info.openKey) setKeyPanelOpen(true);
 }
 
+// A finished image isn't deleted straight away: the card collapses to an undo bar first,
+// so a stray tap doesn't lose it. Failed cards have no image and go immediately.
+function removeWithUndo(card) {
+  if (!card.result) {
+    removeCard(card);
+    return;
+  }
+  let left = UNDO_SECONDS;
+  const button = card.q('.card-undo-btn');
+  const tick = () => {
+    button.textContent = `undo (${left}s)`;
+  };
+  tick();
+  card.node.classList.add('is-removed');
+  card.undoTimer = setInterval(() => {
+    left -= 1;
+    if (left <= 0) removeCard(card);
+    else tick();
+  }, 1000);
+  button.focus();
+}
+
+function undoRemove(card) {
+  clearInterval(card.undoTimer);
+  card.undoTimer = null;
+  card.node.classList.remove('is-removed');
+  card.q('.card-remove').focus();
+}
+
 function removeCard(card) {
   if (card.controller) card.controller.abort();
+  clearInterval(card.undoTimer);
   stopCardTimers(card);
   if (card.objectUrl) URL.revokeObjectURL(card.objectUrl);
   card.node.remove();

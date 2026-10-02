@@ -1157,12 +1157,42 @@ select:hover {
   color: var(--danger);
 }
 
+/* the remove button is hidden mid-generation so the only way to stop one is "cancel" */
+.card.is-pending .card-remove {
+  display: none;
+}
+
+.card-undo {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.card-undo-text {
+  color: var(--muted);
+}
+
+.card.is-removed > :not(.card-undo) {
+  display: none;
+}
+
+.card.is-removed .card-undo {
+  display: flex;
+}
+
+.card.is-removed {
+  border-style: dashed;
+}
+
 .card-mj {
   display: none;
   padding: 0 var(--space-3) var(--space-3);
 }
 
-.card.is-mj.is-done .card-mj {
+.card.is-mj.is-done:not(.is-removed) .card-mj {
   display: block;
 }
 
