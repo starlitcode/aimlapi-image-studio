@@ -132,6 +132,10 @@ const UPSCALE_POLL_MS = 10 * 1000;
 const UPSCALE_TIMEOUT_MS = 30 * 60 * 1000;
 // bigjpg doesn't document a per-minute limit, so a batch runs a couple at a time and the rest wait
 const UPSCALE_AT_ONCE = 2;
+// A 4x or bigger enlarge means many progress checks, and on a phone one of them can drop.
+// Only this many failed checks in a row (about a minute) count as the upscale failing.
+const UPSCALE_POLL_MISSES = 6;
+const UPSCALE_DOWNLOAD_TRIES = 3;
 
 // The api.airforce docs list these models but not their exact contract, so each
 // action sends the finished image as the reference along with the original prompt.
@@ -2138,13 +2142,24 @@ async function requestUpscale(card, signal) {
   const left = typeof task.remaining_api_calls === 'number' ? ` ${task.remaining_api_calls} API calls left.` : '';
   note.textContent = estimate + left;
 
+  let misses = 0;
   for (;;) {
     await pause(UPSCALE_POLL_MS, signal);
-    const all = await upscalerJson(`/task/${task.tid}`, {}, signal);
+    let all;
+    try {
+      all = await upscalerJson(`/task/${task.tid}`, {}, signal);
+      if (misses) note.textContent = estimate + left;
+      misses = 0;
+    } catch (err) {
+      // a wrong password won't fix itself; anything else gets a few more tries
+      if (!(err instanceof StudioError) || err.openKey || ++misses >= UPSCALE_POLL_MISSES) throw err;
+      note.textContent = 'Lost touch with the Worker for a moment. Still waiting...';
+      continue;
+    }
     const status = all[task.tid] || {};
     if (status.status === 'success' && status.url) {
       note.textContent = 'Downloading the result...';
-      return { bytes: await upscaleBytes(status.url, signal) };
+      return { bytes: await downloadUpscale(status.url, signal) };
     }
     // Only "process" and "success" have been seen; anything that reads as a failure stops,
     // anything else keeps waiting until the timeout
@@ -2155,6 +2170,21 @@ async function requestUpscale(card, signal) {
 }
 
 // bigjpg's file host allows cross-origin reads; the Worker's /image route is the fallback
+async function downloadUpscale(url, signal) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await upscaleBytes(url, signal);
+    } catch (err) {
+      if (!(err instanceof StudioError) || attempt >= UPSCALE_DOWNLOAD_TRIES) {
+        // the enlarge itself worked, so offer the file as a link
+        if (err instanceof StudioError && !err.url) err.url = url;
+        throw err;
+      }
+      await pause(5000, signal);
+    }
+  }
+}
+
 async function upscaleBytes(url, signal) {
   try {
     return await fetchImageBytes(url, signal);
