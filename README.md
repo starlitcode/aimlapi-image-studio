@@ -1,0 +1,43 @@
+# api.airforce image generator
+
+A small web page for generating images through [api.airforce](https://api.airforce/docs/api/media/). It's plain HTML, CSS and JavaScript with no build step and no dependencies. It works on phones and laptops, and it opens in dark mode with a light mode toggle.
+
+## Models
+
+| Model ID | Settings |
+| --- | --- |
+| `gemini-3.1-flash-image-preview` | 15 aspect ratios, resolution 512 / 1K / 2K / 4K, up to 14 reference images (PNG, JPEG, WebP, HEIC, HEIF) |
+| `gpt-image-2.5-sunburst` | size, quality (auto to max), background (auto, opaque, transparent), up to 4 reference images |
+| `gpt-image-2.5-flare` | same as Sunburst |
+| `mj_imagine` | 1:1, 16:9, 9:16, up to 4 reference images |
+
+Midjourney results also get upscale, vary subtle, vary strong, reroll and zoom out buttons (`mj_upscale`, `mj_low_variation`, `mj_high_variation`, `mj_reroll`, `mj_zoom`). The api.airforce docs don't say what these models expect as input, so each button sends the finished image as a reference along with the original prompt. They're marked experimental in the UI.
+
+Reference images can be up to 7 MB each.
+
+## Output is always PNG
+
+Every result is a PNG. When a provider sends back JPEG or WebP, the page decodes it and re-encodes it as PNG in your browser before showing it or offering the download. A PNG from the provider is kept byte for byte. The card says when an image was converted.
+
+## Using it
+
+1. Open the page. GitHub Pages works: Settings → Pages → deploy from the `main` branch, root folder.
+2. Paste your `sk-air-...` key into the key panel and save it.
+3. Pick a model, write a prompt, generate.
+
+Results only exist in the open tab, so download the ones you want to keep.
+
+## Your API key
+
+- The key is stored only in your browser. By default it goes in `sessionStorage` and is cleared when you close the tab. If you tick "remember on this device" it goes in `localStorage` instead. "forget key" clears both.
+- The key is sent only in the `Authorization` header of requests to `https://api.airforce`. It never goes in a URL, and it's never logged or written into the page. If an error message from the API happens to contain the key, it gets removed before the message is shown.
+- The page's Content Security Policy only lets scripts and styles load from this site, which blocks third-party and inline scripts. Network requests can only go to https hosts. No analytics, fonts or CDNs are loaded.
+- The key never touches this repository. Anyone else who uses the page has to bring their own key.
+
+Don't tick "remember" on a shared computer.
+
+## Notes
+
+- Requests use `sse: true` so long renders don't get cut off by proxy timeouts. If nothing comes back after 6 minutes, the request is dropped. You can also cancel a pending image yourself.
+- Errors show what failed and what to try next: rejected key, no credits, rate limits, unavailable model, upstream failures, filtered prompts, network problems.
+- The page calls api.airforce directly from your browser. If you see "Couldn't reach api.airforce" even though your connection works, the API may be blocking browser requests (CORS). If that happens, the fix is a small proxy, which this repo doesn't include.
