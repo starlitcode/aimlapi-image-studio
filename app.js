@@ -1056,13 +1056,25 @@ function buildBody(job) {
     sse: true,
   };
   const p = job.params;
-  if (p.aspect) body.aspect_ratio = p.aspect;
+  // api.airforce ignores aspect_ratio for Gemini and returns a square. It reads the shape
+  // from size instead, while the model still sets the resolution (2K came back 2752x1536).
+  if (p.aspect && job.family === 'gemini') body.size = geminiSize(p.aspect);
+  else if (p.aspect) body.aspect_ratio = p.aspect;
   if (p.size && p.size !== 'auto') body.size = p.size;
   if (p.quality && p.quality !== 'auto') body.quality = p.quality;
   if (p.background && p.background !== 'auto') body.background = p.background;
   if (job.family === 'gpt') body.output_format = 'png';
   if (job.refs.length) body.input_images = job.refs.map((ref) => ({ b64_json: ref.base64 }));
   return body;
+}
+
+// A width x height of about one megapixel in the given ratio, edges on a 16px grid.
+// Only the shape matters; 16:9 gives 1360x768.
+function geminiSize(ratio) {
+  const { w, h } = ratioParts(ratio);
+  const scale = Math.sqrt((1024 * 1024) / (w * h));
+  const edge = (n) => Math.max(16, Math.round((n * scale) / 16) * 16);
+  return `${edge(w)}x${edge(h)}`;
 }
 
 function safeJson(text) {
