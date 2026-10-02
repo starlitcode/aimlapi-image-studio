@@ -19,11 +19,19 @@ Midjourney results also get upscale, vary subtle, vary strong, reroll and zoom o
 
 ## Output is always PNG
 
-Every result is a PNG. When a provider sends back JPEG or WebP, the page decodes it and re-encodes it as PNG in your browser before showing it or offering the download. A PNG from the provider is kept byte for byte. The card says when an image was converted.
+Every result is a PNG. When a provider sends back JPEG or WebP, the page decodes it and re-encodes it as PNG in your browser before showing it or offering the download. A PNG from the provider is kept byte for byte. The card says when an image was converted. The one exception is a bigjpg upscale too large for the browser to re-encode: that one is kept as bigjpg sent it (JPEG), and the card says so.
+
+## Upscaling with bigjpg
+
+Finished images can be enlarged with [bigjpg](https://bigjpg.com) (needs a bigjpg plan with API access). bigjpg's API doesn't allow calls from web pages, so a small Cloudflare Worker sits in between: `worker/bigjpg-proxy.js`. It keeps the bigjpg key as a Worker secret, asks for a password of your choosing, and only answers requests from the page's address (`ALLOWED_ORIGIN` at the top of the file).
+
+To set it up, create a Worker in Cloudflare, paste in `worker/bigjpg-proxy.js`, and add two secrets: `BIGJPG_KEY` (from bigjpg's API page, without the `X-API-KEY:` part) and `PROXY_PASSWORD`. Then open the key panel on the page and fill in the Worker's address and password under "bigjpg upscaler". Saving checks them with the Worker first, which doesn't use a bigjpg API call.
+
+After that, every finished image has an upscale row: artwork or photo, 2x to 16x, and noise reduction, with the resulting size shown. Each upscale uses one bigjpg API call (checking on progress doesn't use any) and shows up as its own card. Both of bigjpg's styles come back as JPEG through the API, so the card says "converted from jpeg".
 
 ## Using it
 
-1. Open the page. GitHub Pages works: Settings → Pages → deploy from the `main` branch, root folder.
+1. Open the page. It's hosted on Cloudflare Pages (deployed from `main`, no build step), behind a Cloudflare Access login. Any static host works.
 2. Paste your `sk-air-...` key into the key panel and save it.
 3. Pick a model, write a prompt, generate.
 
@@ -51,4 +59,4 @@ Don't tick "remember" on a shared computer.
 - Each model shows its live status from api.airforce's public model list (up, slow, partial outage, major outage or down). The page checks when it opens, every 5 minutes while the tab is open, after a failed image, and when you press refresh. It warns you before you use a model that's listed as down. The list doesn't need a key, so the key isn't sent with it.
 - When the model's provider fails (a 502 or 503, or a failure reported inside an otherwise successful response), the page tries again on its own: after 3 seconds, then after 8. The card says when it's retrying, and other errors are never retried.
 - Error messages follow api.airforce's [troubleshooting guide](https://api.airforce/docs/troubleshooting/). Each one says what failed and what to try next. API and network errors also have a "details for a bug report" box with the fields their support asks for: time in UTC, endpoint, model, status, error body and the request's trace id. Your key and your prompt are never included.
-- The page calls api.airforce directly from your browser. api.airforce allows this (its CORS headers accept requests from the GitHub Pages address), so no proxy is needed.
+- The page calls api.airforce directly from your browser. api.airforce allows this (its CORS headers accept requests from the page's address), so no proxy is needed for generating.
