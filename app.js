@@ -508,9 +508,13 @@ function renderPrice() {
     const total = price * state.count;
     els.price.textContent = state.count > 1 ? `~$${total.toFixed(2)} for ${state.count}` : `~$${total.toFixed(2)}`;
     els.priceNote.textContent = 'List price from api.airforce.';
+  } else if (model.family === 'gpt' && modelStatus.prices.size) {
+    els.price.textContent = 'price varies';
+    els.priceNote.textContent = 'GPT is charged per token, so the cost depends on size and quality.';
   } else {
+    // prices haven't loaded (or couldn't), so say nothing rather than guess
     els.price.textContent = '';
-    els.priceNote.textContent = model.family === 'gpt' && modelStatus.prices.size ? 'GPT is charged per token, so the price varies.' : '';
+    els.priceNote.textContent = '';
   }
 }
 
