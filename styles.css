@@ -769,13 +769,20 @@ select:hover {
   color: var(--on-accent);
 }
 
-/* per-resolution status: each resolution is a separate model on api.airforce */
-.segmented .model-status {
+/* per-resolution and per-Midjourney-action status: each is a separate model on api.airforce */
+.segmented .model-status,
+.mj-status .model-status {
   margin-left: 6px;
 }
 
-.segmented .model-status.is-unknown {
+.segmented .model-status.is-unknown,
+.mj-status .model-status.is-unknown {
   display: none;
+}
+
+/* keeps an action's name and its status on the same line */
+.mj-action {
+  white-space: nowrap;
 }
 
 /* the status colours don't read on the accent fill; the word still says slow or down */

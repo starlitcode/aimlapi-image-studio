@@ -154,6 +154,7 @@ const els = {
   form: $('#gen-form'),
   modelList: $('#model-list'),
   modelWarning: $('#model-warning'),
+  mjStatus: $('#mj-status'),
   statusText: $('#status-text'),
   statusRefresh: $('#status-refresh'),
   prompt: $('#prompt'),
@@ -462,6 +463,11 @@ function statusOf(modelId) {
   return STATUS_LOOK[raw] || { label: raw.replace(/_/g, ' ') || 'unknown', tone: 'warn' };
 }
 
+// The word only appears when an action model is slow or down.
+function actionLabel(label, look) {
+  return look.tone === 'bad' || look.tone === 'warn' ? `${label} (${look.label})` : label;
+}
+
 function timeAgo(ms) {
   const minutes = Math.floor((Date.now() - ms) / 60000);
   if (minutes < 1) return 'just now';
@@ -489,8 +495,27 @@ function renderStatus() {
     mark.title = `${modelId}: ${look.label}`;
   }
   for (const button of document.querySelectorAll('.card-mj-buttons button')) {
-    const look = statusOf(button.dataset.model);
-    button.textContent = look.tone === 'bad' ? `${button.dataset.label} (${look.label})` : button.dataset.label;
+    button.textContent = actionLabel(button.dataset.label, statusOf(button.dataset.model));
+  }
+  // Midjourney's upscale, vary and the rest are separate models on api.airforce, and their
+  // buttons only appear under a finished image, so their status is listed up front too
+  if (model.family === 'mj') {
+    els.mjStatus.replaceChildren(
+      'actions: ',
+      ...MJ_ACTIONS.flatMap((action, i) => {
+        const look = statusOf(action.model);
+        const mark = document.createElement('span');
+        mark.className = `model-status is-${look.tone}`;
+        mark.textContent = look.tone === 'bad' || look.tone === 'warn' ? look.label : '';
+        mark.title = `${action.model}: ${look.label}`;
+        const item = document.createElement('span');
+        item.className = 'mj-action';
+        item.append(action.label, mark);
+        return [i ? ', ' : '', item];
+      }),
+    );
+  } else {
+    els.mjStatus.replaceChildren();
   }
 
   if (modelStatus.loading) els.statusText.textContent = 'checking status...';
@@ -1422,8 +1447,7 @@ function createCard(job) {
       button.className = 'ghost-btn';
       button.dataset.model = action.model;
       button.dataset.label = action.label;
-      const look = statusOf(action.model);
-      button.textContent = look.tone === 'bad' ? `${action.label} (${look.label})` : action.label;
+      button.textContent = actionLabel(action.label, statusOf(action.model));
       button.addEventListener('click', () => runMjAction(card, action));
       return button;
     }),
