@@ -2073,6 +2073,18 @@ function initBatch() {
   });
 }
 
+// Which part of an upscale a Worker path belongs to, so a failure says where it stopped
+function upscaleStep(path, init) {
+  if (path === '/upload') {
+    const size = init.body && init.body.size ? ` (${(init.body.size / MB).toFixed(1)} MB)` : '';
+    return `uploading the image${size}`;
+  }
+  if (path === '/task') return 'starting the enlarge';
+  if (path.startsWith('/task/')) return 'checking on the enlarge';
+  if (path.startsWith('/image')) return 'downloading the result';
+  return 'talking to it';
+}
+
 async function upscalerFetch(path, init, signal) {
   const { url, password } = state.upscaler;
   let response;
@@ -2087,7 +2099,7 @@ async function upscalerFetch(path, init, signal) {
     });
   } catch (err) {
     if (err && err.name === 'AbortError') throw err;
-    throw new StudioError('upscale', { detail: "Couldn't reach your bigjpg Worker. Check your connection and the Worker address in the key panel." });
+    throw new StudioError('upscale', { detail: `Couldn't reach your bigjpg Worker while ${upscaleStep(path, init)}. Check your connection and the Worker address in the key panel.` });
   }
   if (response.status === 401) {
     throw new StudioError('upscale', { detail: 'The Worker says the password is wrong. Update it in the key panel.', openKey: true });
@@ -2100,7 +2112,7 @@ async function upscalerJson(path, init, signal) {
   const data = safeJson(await response.text());
   if (!response.ok || !data || data.error) {
     const said = data && data.error ? data.error : `status ${response.status}`;
-    throw new StudioError('upscale', { detail: `The Worker said: ${said}` });
+    throw new StudioError('upscale', { detail: `The Worker said, while ${upscaleStep(path, init)}: ${said}` });
   }
   return data;
 }
