@@ -769,6 +769,20 @@ select:hover {
   color: var(--on-accent);
 }
 
+/* per-resolution status: each resolution is a separate model on api.airforce */
+.segmented .model-status {
+  margin-left: 6px;
+}
+
+.segmented .model-status.is-unknown {
+  display: none;
+}
+
+/* the status colours don't read on the accent fill; the word still says slow or down */
+.segmented input:checked + span .model-status {
+  color: inherit;
+}
+
 .segmented input:focus-visible + span {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

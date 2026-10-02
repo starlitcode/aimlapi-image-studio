@@ -7,6 +7,9 @@ const MODELS_URL = 'https://api.airforce/v1/models';
 const STATUS_REFRESH_MS = 5 * 60 * 1000;
 // After a failed image, recheck status if the last check is older than this.
 const STATUS_RECHECK_MS = 30 * 1000;
+// api.airforce's list can call a model operational while every request to it comes back
+// "Model not found". After that answer the model shows as down for this long.
+const NOT_FOUND_MS = 10 * 60 * 1000;
 const STATUS_LOOK = {
   operational: { label: 'up', tone: 'ok' },
   degraded: { label: 'slow', tone: 'warn' },
@@ -213,7 +216,7 @@ const cards = new Map();
 
 // answered: null before the first check, true once api.airforce replied, false if the
 // latest check failed. A failed check keeps the last good statuses instead of wiping them.
-const modelStatus = { byId: new Map(), prices: new Map(), checkedAt: 0, answered: null, loading: false };
+const modelStatus = { byId: new Map(), prices: new Map(), notFoundAt: new Map(), checkedAt: 0, answered: null, loading: false };
 
 // saved.available: null until IndexedDB has been tried, then true or false.
 // saved.bytes maps each saved record id to its image size, for the "saved on this device" line.
@@ -451,6 +454,8 @@ function normalizeMjPrompt(prompt) {
 /* ---------- live model status ---------- */
 
 function statusOf(modelId) {
+  const notFoundAt = modelStatus.notFoundAt.get(modelId);
+  if (notFoundAt && Date.now() - notFoundAt < NOT_FOUND_MS) return { label: 'down', tone: 'bad', seen: true };
   if (!modelStatus.byId.size) return { label: 'unknown', tone: 'unknown' };
   if (!modelStatus.byId.has(modelId)) return { label: 'not listed', tone: 'bad' };
   const raw = modelStatus.byId.get(modelId);
@@ -471,6 +476,18 @@ function renderStatus() {
     pill.textContent = look.label;
     pill.className = `model-status is-${look.tone}`;
   }
+  // each resolution is its own model on api.airforce, so each button gets its own status
+  const model = currentModel();
+  for (const input of els.resGroup.querySelectorAll('input')) {
+    const modelId = model.resolutionModels && model.resolutionModels[input.value];
+    const mark = input.nextElementSibling && input.nextElementSibling.querySelector('.model-status');
+    if (!modelId || !mark) continue;
+    const look = statusOf(modelId);
+    // a dot alone when it's fine, the word too when it's slow or down
+    mark.textContent = look.tone === 'bad' || look.tone === 'warn' ? look.label : '';
+    mark.className = `model-status is-${look.tone}`;
+    mark.title = `${modelId}: ${look.label}`;
+  }
   for (const button of document.querySelectorAll('.card-mj-buttons button')) {
     const look = statusOf(button.dataset.model);
     button.textContent = look.tone === 'bad' ? `${button.dataset.label} (${look.label})` : button.dataset.label;
@@ -483,9 +500,9 @@ function renderStatus() {
   else els.statusText.textContent = '';
   els.statusRefresh.disabled = modelStatus.loading;
 
-  const model = currentModel();
   const look = statusOf(sendModelId(model));
-  const warning = look.tone === 'bad' ? `api.airforce lists ${model.name} as ${look.label} right now, so it will probably fail.`
+  const warning = look.seen ? `${sendModelId(model)} answered "Model not found" on the last try, so it's down right now.`
+    : look.tone === 'bad' ? `api.airforce lists ${model.name} as ${look.label} right now, so it will probably fail.`
     : look.tone === 'warn' ? `api.airforce lists ${model.name} as ${look.label} right now. It may be slow or fail.`
     : '';
   showNote(els.modelWarning, look.tone === 'bad' ? { error: warning } : { warning });
@@ -786,6 +803,11 @@ function renderControls() {
       savePrefs();
       renderStatus();
     });
+    for (const text of els.resGroup.querySelectorAll('span')) {
+      const mark = document.createElement('span');
+      mark.className = 'model-status';
+      text.append(mark);
+    }
   }
 
   const heic = model.refTypes.includes('image/heic');
@@ -1490,18 +1512,26 @@ async function runCard(card) {
     if (!state.apiKey) throw new StudioError('no-key');
     const answer = await requestWithRetries(card, controller.signal);
     const bytes = answer.base64 ? base64ToBytes(answer.base64) : await fetchImageBytes(answer.url, controller.signal);
+    if (modelStatus.notFoundAt.delete(job.modelId)) renderStatus();
     const png = await toPng(bytes);
     if (!cards.has(card.id)) return;
     showResult(card, png, Date.now() - started);
   } catch (err) {
     if (!cards.has(card.id)) return;
     const apiFailure = err instanceof ApiError || err instanceof StudioError;
+    if (err instanceof ApiError && err.httpStatus === 404 && /model not found/i.test(err.serverMessage)) {
+      modelStatus.notFoundAt.set(job.modelId, Date.now());
+      renderStatus();
+    }
     if (apiFailure && Date.now() - modelStatus.checkedAt > STATUS_RECHECK_MS) await refreshStatus();
     if (!cards.has(card.id)) return;
     const info = describeError(err, job, timedOut);
     const look = statusOf(job.modelId);
     if (apiFailure && look.tone === 'bad') {
-      if (err instanceof ApiError && err.status === 404) {
+      if (look.seen) {
+        info.title = 'Model is down';
+        info.body = `${job.modelId} answered "Model not found", so api.airforce isn't taking requests for it right now, even if its status list says otherwise. Try again later or pick another model.`;
+      } else if (err instanceof ApiError && err.status === 404) {
         info.title = 'Model is down';
         info.body = `api.airforce lists ${job.modelId} as ${look.label} right now, so it isn't taking requests. Try again later or pick another model.`;
       } else {
