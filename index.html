@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <!--
-    The ?v= on styles.css and app.js is the start of each file's SHA-256. GitHub Pages lets
-    browsers cache files for 10 minutes, so a new page could otherwise run an old script.
-    Re-stamp both after editing them.
+    The ?v= on styles.css and app.js is the start of each file's SHA-256, so a browser
+    holding a cached copy can't pair a new page with an old script. Re-stamp both after
+    editing them.
 
     The API key lives in this page, so nothing third-party is allowed to run here.
     Scripts and styles only load from this site, and network calls only go to https hosts
-    (api.airforce, plus the file host it sometimes returns image links on).
+    (api.airforce, the bigjpg Worker, and the file hosts they return images on).
   -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src https://api.airforce https:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
