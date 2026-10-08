@@ -367,6 +367,7 @@ textarea {
 input[type="password"],
 input[type="text"],
 input[type="url"],
+input[type="number"],
 textarea,
 select {
   width: 100%;
@@ -863,6 +864,27 @@ select:hover {
   background: var(--danger);
 }
 
+.custom-dims {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.custom-dims input {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 120px;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.custom-dims input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
 .field-note {
   margin: var(--space-2) 0 0;
   color: var(--muted);
@@ -872,6 +894,14 @@ select:hover {
 
 .field-note:empty {
   display: none;
+}
+
+.field-note.is-warn {
+  color: var(--warn);
+}
+
+.field-note.is-error {
+  color: var(--danger);
 }
 
 .field-error,

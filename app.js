@@ -36,9 +36,7 @@ const MODELS = [
     name: 'Nano Banana 2',
     note: 'Google Gemini 3.1 Flash Image. Up to 14 reference images, resolution up to 4K.',
     family: 'gemini',
-    aspectRatios: ['auto', '1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9'],
-    // AI/ML API's schema lists only 1K, 2K and 4K. 512 is Google's own smallest size and is
-    // offered in case AI/ML API passes it through; if not, the card shows their validation error.
+    aspectRatios: ['auto', '1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9', '9:21', '1:4', '4:1', '1:8', '8:1'],
     resolutions: ['512', '1K', '2K', '4K'],
     defaultResolution: '1K',
     // One of the two request shapes AI/ML API accepts caps references at 5, the other has no
@@ -67,16 +65,38 @@ const MODELS = [
   },
 ];
 
-// The only sizes AI/ML API takes for GPT Image 2.5
 const GPT_SIZES = [
   ['auto', 'auto'],
   ['1024x1024', '1024 × 1024 square'],
   ['1536x1024', '1536 × 1024 landscape'],
   ['1024x1536', '1024 × 1536 portrait'],
+  ['2048x2048', '2048 × 2048 square, 2K (experimental)'],
+  ['2048x1152', '2048 × 1152 landscape, 2K'],
+  ['1152x2048', '1152 × 2048 portrait, 2K'],
+  ['3840x2160', '3840 × 2160 landscape, 4K (experimental)'],
+  ['2160x3840', '2160 × 3840 portrait, 4K (experimental)'],
+  ['custom', 'custom size'],
 ];
 
+// GPT Image 2.5 size rules from OpenAI's image guide
+const GPT_EDGE_STEP = 16;
+const GPT_MAX_EDGE = 3840;
+const GPT_MAX_RATIO = 3;
+const GPT_MIN_PIXELS = 655360;
+const GPT_MAX_PIXELS = 8294400;
+const GPT_STABLE_PIXELS = 2560 * 1440;
+
+// What AI/ML API's own schema lists. The pickers also offer what OpenAI and Google document
+// for these models; AI/ML API may pass those through or reject them, and the page says so.
+const AIML_LISTED = {
+  size: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+  quality: ['low', 'medium', 'high'],
+  aspect: ['auto', '21:9', '1:1', '4:3', '3:2', '2:3', '5:4', '4:5', '3:4', '16:9', '9:16'],
+  resolution: ['1K', '2K', '4K'],
+};
+
 const GPT_BACKGROUNDS = ['auto', 'opaque', 'transparent'];
-const GPT_QUALITIES = [['low', 'low'], ['medium', 'medium'], ['high', 'high']];
+const GPT_QUALITIES = [['auto', 'auto'], ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max']];
 // Only the no-reference endpoint has a moderation setting
 const GPT_MODERATIONS = [['auto', 'auto'], ['low', 'low (less filtering)']];
 // Where AI/ML API sends a Nano Banana 2 request; auto falls back from Google to fal.ai
@@ -126,6 +146,13 @@ const els = {
   refsNote: $('#refs-note'),
   savedLine: $('#saved-line'),
   aspectGrid: $('#aspect-grid'),
+  aspectNote: $('#aspect-note'),
+  resNote: $('#res-note'),
+  sizeCustom: $('#size-custom'),
+  sizeW: $('#size-w'),
+  sizeH: $('#size-h'),
+  sizeNote: $('#size-note'),
+  qualityNote: $('#quality-note'),
   resGroup: $('#res-group'),
   size: $('#size'),
   background: $('#background'),
@@ -175,6 +202,7 @@ const state = {
   provider: 'auto',
   webSearch: false,
   count: 1,
+  customSize: { w: 1280, h: 720 },
   // the last enlarge settings picked on a card; the defaults match bigjpg's own form
   upscale: { style: 'art', x2: '2', noise: '3' },
   upscaler: null,
@@ -436,8 +464,8 @@ function initUpscaler() {
 /* ---------- preferences (non-sensitive, per device) ---------- */
 
 function savePrefs() {
-  const { modelId, aspect, resolution, size, background, quality, moderation, provider, webSearch, count, upscale } = state;
-  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, background, quality, moderation, provider, webSearch, count, upscale }));
+  const { modelId, aspect, resolution, size, customSize, background, quality, moderation, provider, webSearch, count, upscale } = state;
+  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, customSize, background, quality, moderation, provider, webSearch, count, upscale }));
 }
 
 function loadPrefs() {
@@ -459,6 +487,8 @@ function loadPrefs() {
   if (known(GEMINI_PROVIDERS, prefs.provider)) state.provider = prefs.provider;
   if (typeof prefs.webSearch === 'boolean') state.webSearch = prefs.webSearch;
   if (COUNTS.includes(prefs.count)) state.count = prefs.count;
+  const pair = (value) => value && Number.isInteger(value.w) && Number.isInteger(value.h) && value.w > 0 && value.h > 0;
+  if (pair(prefs.customSize)) state.customSize = { w: prefs.customSize.w, h: prefs.customSize.h };
   const up = prefs.upscale;
   if (up && known(UPSCALE_STYLES, up.style) && known(UPSCALE_SCALES, up.x2) && known(UPSCALE_NOISE, up.noise)) {
     state.upscale = { style: up.style, x2: up.x2, noise: up.noise };
@@ -546,6 +576,7 @@ function renderAspects(model) {
   const pick = (value) => {
     state.aspect = value;
     savePrefs();
+    renderNotes();
   };
   els.aspectGrid.replaceChildren(
     ...model.aspectRatios.map((ratio) => {
@@ -559,6 +590,67 @@ function renderAspects(model) {
       return option;
     }),
   );
+}
+
+function wholeNumber(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+const fmt = (n) => n.toLocaleString('en-US');
+
+function checkGptSize(w, h) {
+  if (!w || !h) return { error: 'Enter a width and height in pixels.' };
+  if (w % GPT_EDGE_STEP || h % GPT_EDGE_STEP) {
+    const round = (n) => Math.max(GPT_EDGE_STEP, Math.round(n / GPT_EDGE_STEP) * GPT_EDGE_STEP);
+    return { error: `Both sides must be multiples of ${GPT_EDGE_STEP}. Closest: ${round(w)} × ${round(h)}.` };
+  }
+  if (w > GPT_MAX_EDGE || h > GPT_MAX_EDGE) return { error: `Neither side can be over ${fmt(GPT_MAX_EDGE)} pixels.` };
+  if (Math.max(w, h) / Math.min(w, h) > GPT_MAX_RATIO) return { error: `The shape has to stay between 1:${GPT_MAX_RATIO} and ${GPT_MAX_RATIO}:1.` };
+  const pixels = w * h;
+  if (pixels < GPT_MIN_PIXELS) return { error: `${fmt(pixels)} pixels is too small. The minimum is ${fmt(GPT_MIN_PIXELS)}.` };
+  if (pixels > GPT_MAX_PIXELS) return { error: `${fmt(pixels)} pixels is too big. The maximum is ${fmt(GPT_MAX_PIXELS)}.` };
+  if (pixels > GPT_STABLE_PIXELS) return { warning: 'Bigger than 2560 × 1440 is experimental, so results may vary.' };
+  return {};
+}
+
+function showNote(note, result, inputs = []) {
+  note.textContent = result.error || result.warning || '';
+  note.classList.toggle('is-error', Boolean(result.error));
+  note.classList.toggle('is-warn', !result.error && Boolean(result.warning));
+  for (const input of inputs) input.setAttribute('aria-invalid', String(Boolean(result.error)));
+}
+
+// The size a job will actually send, with "custom" resolved to numbers.
+function resolvedSize() {
+  return state.size === 'custom' ? `${state.customSize.w}x${state.customSize.h}` : state.size;
+}
+
+function sizeCheck() {
+  if (currentModel().family !== 'gpt' || state.size === 'auto') return {};
+  if (state.size === 'custom') {
+    const [w, h] = resolvedSize().split('x').map(wholeNumber);
+    const result = checkGptSize(w, h);
+    if (result.error) return result;
+  }
+  return unlisted('size', resolvedSize());
+}
+
+function unlisted(kind, value) {
+  if (AIML_LISTED[kind].includes(value)) return {};
+  return { warning: `AI/ML API doesn't list ${value} for this model, so it may reject it. If it does, the card says why.` };
+}
+
+// The notes under the pickers: size rules for a custom GPT size, and a heads-up wherever
+// the picked value is one AI/ML API's schema doesn't list.
+function renderNotes() {
+  const model = currentModel();
+  const isCustom = model.family === 'gpt' && state.size === 'custom';
+  els.sizeCustom.hidden = !isCustom;
+  showNote(els.sizeNote, sizeCheck(), isCustom ? [els.sizeW, els.sizeH] : []);
+  showNote(els.qualityNote, model.family === 'gpt' ? unlisted('quality', state.quality) : {});
+  showNote(els.aspectNote, model.family === 'gemini' ? unlisted('aspect', state.aspect) : {});
+  showNote(els.resNote, model.family === 'gemini' ? unlisted('resolution', state.resolution) : {});
 }
 
 function renderSegmented(container, name, values, current, onChange, format = String) {
@@ -609,8 +701,10 @@ function renderControls() {
     renderSegmented(els.resGroup, 'resolution', model.resolutions, state.resolution, (value) => {
       state.resolution = value;
       savePrefs();
+      renderNotes();
     });
   }
+  renderNotes();
 
   const heic = model.refTypes.includes('image/heic');
   els.refInput.accept = heic ? `${model.refTypes.join(',')},.heic,.heif` : model.refTypes.join(',');
@@ -634,7 +728,18 @@ function initControls() {
   els.size.addEventListener('change', () => {
     state.size = els.size.value;
     savePrefs();
+    renderNotes();
   });
+  els.sizeW.value = String(state.customSize.w);
+  els.sizeH.value = String(state.customSize.h);
+  const onSizeInput = () => {
+    state.customSize = { w: wholeNumber(els.sizeW.value) || 0, h: wholeNumber(els.sizeH.value) || 0 };
+    savePrefs();
+    renderNotes();
+    clearFormError();
+  };
+  els.sizeW.addEventListener('input', onSizeInput);
+  els.sizeH.addEventListener('input', onSizeInput);
   els.background.addEventListener('change', () => {
     state.background = els.background.value;
     savePrefs();
@@ -642,6 +747,7 @@ function initControls() {
   els.quality.addEventListener('change', () => {
     state.quality = els.quality.value;
     savePrefs();
+    renderNotes();
   });
   els.moderation.addEventListener('change', () => {
     state.moderation = els.moderation.value;
@@ -846,7 +952,7 @@ function snapshotJob() {
   if (model.aspectRatios) params.aspect = state.aspect;
   if (model.resolutions) params.resolution = state.resolution;
   if (model.family === 'gpt') {
-    params.size = state.size;
+    params.size = resolvedSize();
     params.background = state.background;
     params.quality = state.quality;
     params.moderation = state.moderation;
@@ -1961,7 +2067,15 @@ function reuseSettings(card, button) {
   if (pick.resolution && model.resolutions && model.resolutions.includes(pick.resolution)) state.resolution = pick.resolution;
   if (model.aspectRatios && model.aspectRatios.includes(p.aspect)) state.aspect = p.aspect;
   if (model.family === 'gpt') {
-    if (GPT_SIZES.some(([value]) => value === p.size)) state.size = p.size;
+    if (p.size && GPT_SIZES.some(([value]) => value === p.size)) {
+      state.size = p.size;
+    } else if (p.size) {
+      const [w, h] = p.size.split('x').map(wholeNumber);
+      if (w && h) {
+        state.size = 'custom';
+        state.customSize = { w, h };
+      }
+    }
     if (GPT_BACKGROUNDS.includes(p.background)) state.background = p.background;
     if (GPT_QUALITIES.some(([value]) => value === p.quality)) state.quality = p.quality;
     if (GPT_MODERATIONS.some(([value]) => value === p.moderation)) state.moderation = p.moderation;
@@ -1975,6 +2089,8 @@ function reuseSettings(card, button) {
   renderModels();
   els.size.value = state.size;
   els.background.value = state.background;
+  els.sizeW.value = String(state.customSize.w);
+  els.sizeH.value = String(state.customSize.h);
   els.quality.value = state.quality;
   els.moderation.value = state.moderation;
   els.provider.value = state.provider;
@@ -2074,6 +2190,8 @@ function validate() {
     els.prompt.focus();
     return 'Write a prompt first.';
   }
+  const size = sizeCheck();
+  if (size.error) return `Size: ${size.error}`;
   const problems = refProblems();
   if (problems.length) return problems.join(' ');
   return '';
