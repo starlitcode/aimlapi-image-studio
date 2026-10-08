@@ -19,9 +19,6 @@
   --on-accent: #ffffff;
   --danger: #ff8193;
   --warn: #f5c26b;
-  --ok: #6fd39a;
-  --param-name: #ff5fb9;
-  --param-value: #ff94cf;
   --danger-soft: rgba(255, 129, 147, 0.1);
   --checker-a: #1a1522;
   --checker-b: #221b2c;
@@ -45,9 +42,6 @@
   --on-accent: #ffffff;
   --danger: #b8233b;
   --warn: #8a5300;
-  --ok: #17703f;
-  --param-name: #b4126e;
-  --param-value: #b0447c;
   --danger-soft: rgba(184, 35, 59, 0.07);
   --checker-a: #efebf5;
   --checker-b: #e5dfee;
@@ -189,17 +183,6 @@ textarea {
   color: var(--muted);
   cursor: not-allowed;
   transform: none;
-}
-
-.primary-btn .price {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  opacity: 0.85;
-}
-
-.primary-btn .price:empty {
-  display: none;
 }
 
 /* keyboard shortcuts only mean something with a real keyboard and mouse */
@@ -384,7 +367,6 @@ textarea {
 input[type="password"],
 input[type="text"],
 input[type="url"],
-input[type="number"],
 textarea,
 select {
   width: 100%;
@@ -402,72 +384,6 @@ textarea {
   resize: vertical;
   min-height: 120px;
   line-height: 1.5;
-}
-
-/*
-  A textarea can't colour part of its text, so the prompt is drawn twice: a mirror
-  behind it holds the coloured copy, and the textarea on top keeps the caret,
-  selection and typing with its own text made transparent. Both boxes must wrap
-  identically, so they share every property that affects line breaks.
-*/
-.prompt-wrap {
-  position: relative;
-}
-
-.prompt-mirror,
-.prompt-wrap textarea {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid transparent;
-  font-family: inherit;
-  font-size: 16px;
-  line-height: 1.5;
-  letter-spacing: normal;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  word-break: normal;
-  tab-size: 4;
-  scrollbar-gutter: stable;
-}
-
-.prompt-mirror {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text);
-  pointer-events: none;
-}
-
-.prompt-wrap textarea {
-  position: relative;
-  border-color: var(--line-strong);
-  background: transparent;
-  color: transparent;
-  caret-color: var(--text);
-}
-
-.prompt-wrap textarea::placeholder {
-  color: var(--muted);
-}
-
-.param-name {
-  color: var(--param-name);
-}
-
-.param-value {
-  color: var(--param-value);
-}
-
-/* system high-contrast mode forces text colours, which would show both copies */
-@media (forced-colors: active) {
-  .prompt-mirror {
-    display: none;
-  }
-
-  .prompt-wrap textarea {
-    color: CanvasText;
-  }
 }
 
 select {
@@ -589,48 +505,6 @@ select:hover {
   font-size: var(--text-sm);
 }
 
-/* live model status from api.airforce: a dot plus a word, so it doesn't rely on colour alone */
-.model-status {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-}
-
-.model-status::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.model-status.is-ok {
-  color: var(--ok);
-}
-
-.model-status.is-warn {
-  color: var(--warn);
-}
-
-.model-status.is-bad {
-  color: var(--danger);
-}
-
-.status-line {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
-  color: var(--muted);
-  font-size: var(--text-xs);
-  text-align: right;
-}
-
 .text-btn {
   padding: 0;
   border: 0;
@@ -639,12 +513,6 @@ select:hover {
   font-size: var(--text-xs);
   text-decoration: underline;
   cursor: pointer;
-}
-
-.text-btn:disabled {
-  color: var(--muted);
-  text-decoration: none;
-  cursor: default;
 }
 
 .model-id {
@@ -710,10 +578,6 @@ select:hover {
   border-radius: 2px;
 }
 
-.aspect-option.is-custom .aspect-shape span {
-  border-style: dashed;
-}
-
 .aspect-option:hover {
   border-color: var(--line-strong);
 }
@@ -777,27 +641,6 @@ select:hover {
 .segmented input:checked + span {
   background: var(--accent);
   color: var(--on-accent);
-}
-
-/* per-resolution and per-Midjourney-action status: each is a separate model on api.airforce */
-.segmented .model-status,
-.mj-status .model-status {
-  margin-left: 6px;
-}
-
-.segmented .model-status.is-unknown,
-.mj-status .model-status.is-unknown {
-  display: none;
-}
-
-/* keeps an action's name and its status on the same line */
-.mj-action {
-  white-space: nowrap;
-}
-
-/* the status colours don't read on the accent fill; the word still says slow or down */
-.segmented input:checked + span .model-status {
-  color: inherit;
 }
 
 .segmented input:focus-visible + span {
@@ -1009,27 +852,6 @@ select:hover {
   background: var(--danger);
 }
 
-.custom-dims {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  color: var(--muted);
-  font-family: var(--font-mono);
-}
-
-.custom-dims input {
-  flex: 1 1 0;
-  min-width: 0;
-  max-width: 120px;
-  font-family: var(--font-mono);
-  text-align: center;
-}
-
-.custom-dims input[aria-invalid="true"] {
-  border-color: var(--danger);
-}
-
 .field-note {
   margin: var(--space-2) 0 0;
   color: var(--muted);
@@ -1039,14 +861,6 @@ select:hover {
 
 .field-note:empty {
   display: none;
-}
-
-.field-note.is-warn {
-  color: var(--warn);
-}
-
-.field-note.is-error {
-  color: var(--danger);
 }
 
 .field-error,
@@ -1397,21 +1211,6 @@ select:hover {
 
 .card.is-removed {
   border-style: dashed;
-}
-
-.card-mj {
-  display: none;
-  padding: 0 var(--space-3) var(--space-3);
-}
-
-.card.is-mj.is-done:not(.is-removed) .card-mj {
-  display: block;
-}
-
-.card-mj-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
 }
 
 /* shown on finished images once the bigjpg Worker is saved in the key panel */

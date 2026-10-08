@@ -6,6 +6,9 @@
 //   BIGJPG_KEY      the X-API-KEY from bigjpg's API page
 //   PROXY_PASSWORD  any password; the page sends it as X-Proxy-Password
 //
+// Variable (same place, type "Text"):
+//   ALLOWED_ORIGIN  the site's address, e.g. https://your-site.pages.dev, no trailing slash
+//
 // Routes:
 //   POST /upload        body: the image bytes, Content-Type: image/png or image/jpeg
 //                       uploads it to bigjpg and answers { fileurl }
@@ -14,12 +17,12 @@
 //   GET  /image?url=... fetches a finished image so the page can read it
 
 const BIGJPG = 'https://bigjpg.com';
-const ALLOWED_ORIGIN = 'https://api-airforce-image-generator.pages.dev';
 const EXTENSIONS = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
+// origin is always the site's own address, so a page anywhere else can't read the answers
 function cors(origin) {
   return {
-    'Access-Control-Allow-Origin': origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN,
+    'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-Proxy-Password',
     'Access-Control-Max-Age': '86400',
@@ -99,9 +102,9 @@ async function image(url, origin) {
 
 export default {
   async fetch(request, env) {
-    const origin = request.headers.get('Origin') || '';
+    const origin = env.ALLOWED_ORIGIN || '';
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });
-    if (!env.BIGJPG_KEY || !env.PROXY_PASSWORD) return json({ error: 'The Worker is missing its secrets.' }, 500, origin);
+    if (!env.BIGJPG_KEY || !env.PROXY_PASSWORD || !origin) return json({ error: 'The Worker is missing its secrets or ALLOWED_ORIGIN.' }, 500, origin);
     if (!(await passwordMatches(request.headers.get('X-Proxy-Password'), env.PROXY_PASSWORD))) {
       return json({ error: 'Wrong password.' }, 401, origin);
     }
