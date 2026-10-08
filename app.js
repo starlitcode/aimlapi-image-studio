@@ -19,8 +19,6 @@ const STORAGE_KEY = `${STORAGE_PREFIX}:key`;
 const STORAGE_THEME = `${STORAGE_PREFIX}:theme`;
 const STORAGE_PREFS = `${STORAGE_PREFIX}:prefs`;
 const STORAGE_HISTORY = `${STORAGE_PREFIX}:history`;
-// The bigjpg Worker's address and password, kept apart from the API key
-const STORAGE_UPSCALER = `${STORAGE_PREFIX}:upscaler`;
 const HISTORY_LIMIT = 20;
 
 // Finished images are kept in IndexedDB so they survive a reload. Each record holds the
@@ -103,20 +101,6 @@ const GPT_MODERATIONS = [['auto', 'auto'], ['low', 'low (less filtering)']];
 const GEMINI_PROVIDERS = [['auto', 'auto (Google, then fal.ai)'], ['google', 'Google only'], ['fal', 'fal.ai only']];
 const COUNTS = [1, 2, 3, 4];
 
-// bigjpg's enlarge settings: the value is what its API takes, the text is what the page shows
-const UPSCALE_STYLES = [['art', 'artwork'], ['photo', 'photo']];
-const UPSCALE_SCALES = [['1', '2x'], ['2', '4x'], ['3', '8x'], ['4', '16x']];
-const UPSCALE_NOISE = [['-1', 'no noise reduction'], ['0', 'low noise reduction'], ['1', 'medium noise reduction'], ['2', 'high noise reduction'], ['3', 'highest noise reduction']];
-// bigjpg took about 80 seconds for a 2x enlarge; checking every 10 seconds costs no API calls
-const UPSCALE_POLL_MS = 10 * 1000;
-const UPSCALE_TIMEOUT_MS = 30 * 60 * 1000;
-// bigjpg doesn't document a per-minute limit, so a batch runs a couple at a time and the rest wait
-const UPSCALE_AT_ONCE = 2;
-// A 4x or bigger enlarge means many progress checks, and on a phone one of them can drop.
-// Only this many failed checks in a row (about a minute) count as the upscale failing.
-const UPSCALE_POLL_MISSES = 6;
-const UPSCALE_DOWNLOAD_TRIES = 3;
-
 const $ = (selector) => document.querySelector(selector);
 
 const els = {
@@ -129,12 +113,6 @@ const els = {
   keyRemember: $('#key-remember'),
   keyStatus: $('#key-status'),
   keyForget: $('#key-forget'),
-  upscalerForm: $('#upscaler-form'),
-  upscalerUrl: $('#upscaler-url'),
-  upscalerPassword: $('#upscaler-password'),
-  upscalerRemember: $('#upscaler-remember'),
-  upscalerStatus: $('#upscaler-status'),
-  upscalerForget: $('#upscaler-forget'),
   themeToggle: $('#theme-toggle'),
   form: $('#gen-form'),
   modelList: $('#model-list'),
@@ -173,17 +151,6 @@ const els = {
   gallery: $('#gallery'),
   empty: $('#empty'),
   clearGallery: $('#clear-gallery'),
-  upscaleOwn: $('#upscale-own'),
-  upscaleFile: $('#upscale-file'),
-  upscaleSeveral: $('#upscale-several'),
-  batchBar: $('#batch-bar'),
-  batchCount: $('#batch-count'),
-  batchStyle: $('#batch-style'),
-  batchScale: $('#batch-scale'),
-  batchNoise: $('#batch-noise'),
-  batchAll: $('#batch-all'),
-  batchDone: $('#batch-done'),
-  batchStart: $('#batch-start'),
   viewer: $('#viewer'),
   viewerImg: $('#viewer-img'),
   viewerClose: $('#viewer-close'),
@@ -203,15 +170,11 @@ const state = {
   webSearch: false,
   count: 1,
   customSize: { w: 1280, h: 720 },
-  // the last enlarge settings picked on a card; the defaults match bigjpg's own form
-  upscale: { style: 'art', x2: '2', noise: '3' },
-  upscaler: null,
   refs: [],
 };
 
 let nextId = 1;
 const cards = new Map();
-const upscaleQueue = { running: 0, waiting: [] };
 
 // saved.available: null until IndexedDB has been tried, then true or false.
 // saved.bytes maps each saved record id to its image size, for the "saved on this device" line.
@@ -360,112 +323,11 @@ function initKey() {
   });
 }
 
-/* ---------- bigjpg upscaler settings ---------- */
-
-function setUpscalerStatus(message, isError) {
-  els.upscalerStatus.textContent = message;
-  els.upscalerStatus.classList.toggle('is-error', Boolean(isError));
-}
-
-function renderUpscaler() {
-  document.body.classList.toggle('has-upscaler', Boolean(state.upscaler));
-}
-
-function readUpscaler() {
-  const remembered = storageGet('localStorage', STORAGE_UPSCALER);
-  const raw = storageGet('sessionStorage', STORAGE_UPSCALER) || remembered;
-  let saved;
-  try {
-    saved = JSON.parse(raw || 'null');
-  } catch (_) {
-    return { upscaler: null, remembered: false };
-  }
-  const valid = saved && typeof saved.url === 'string' && /^https:\/\//.test(saved.url) && typeof saved.password === 'string' && saved.password;
-  return { upscaler: valid ? { url: saved.url, password: saved.password } : null, remembered: Boolean(remembered) };
-}
-
-// A result query for a made-up task: the Worker checks the password and bigjpg answers {},
-// so this proves the setup works without using any of bigjpg's API calls.
-async function checkUpscaler(upscaler) {
-  let response;
-  try {
-    response = await fetch(`${upscaler.url}/task/check`, {
-      headers: { 'X-Proxy-Password': upscaler.password },
-      credentials: 'omit',
-      referrerPolicy: 'no-referrer',
-      cache: 'no-store',
-    });
-  } catch (_) {
-    return "Couldn't reach the Worker. Check the address, and that the Worker allows this page's address.";
-  }
-  if (response.status === 401) return 'The Worker says that password is wrong.';
-  if (!response.ok) {
-    const data = safeJson(await response.text());
-    return `The Worker answered ${response.status}${data && data.error ? `: ${data.error}` : ''}.`;
-  }
-  return '';
-}
-
-function initUpscaler() {
-  const { upscaler, remembered } = readUpscaler();
-  state.upscaler = upscaler;
-  els.upscalerRemember.checked = remembered;
-  if (upscaler) {
-    els.upscalerUrl.value = upscaler.url;
-    setUpscalerStatus('Upscaler is set up.');
-  }
-  renderUpscaler();
-
-  els.upscalerForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const url = els.upscalerUrl.value.trim().replace(/\/+$/, '');
-    const password = els.upscalerPassword.value;
-    if (!/^https:\/\/[^\s/]+$/.test(url)) {
-      setUpscalerStatus('Paste the Worker address, starting with https:// and with nothing after the domain.', true);
-      return;
-    }
-    if (!password) {
-      setUpscalerStatus('Type the Worker password.', true);
-      return;
-    }
-    setUpscalerStatus('Checking with the Worker...');
-    const problem = await checkUpscaler({ url, password });
-    if (problem) {
-      setUpscalerStatus(problem, true);
-      return;
-    }
-    storageRemove('localStorage', STORAGE_UPSCALER);
-    storageRemove('sessionStorage', STORAGE_UPSCALER);
-    const remember = els.upscalerRemember.checked;
-    const stored = storageSet(remember ? 'localStorage' : 'sessionStorage', STORAGE_UPSCALER, JSON.stringify({ url, password }));
-    state.upscaler = { url, password };
-    els.upscalerUrl.value = url;
-    els.upscalerPassword.value = '';
-    renderUpscaler();
-    let message = remember ? 'Connected and saved on this device.' : 'Connected and saved for this tab only.';
-    if (!stored) message = 'Connected, but this browser blocked storage, so it only lasts until you reload.';
-    setUpscalerStatus(message);
-  });
-
-  els.upscalerForget.addEventListener('click', () => {
-    if (!window.confirm('Forget the upscaler address and password on this browser?')) return;
-    storageRemove('localStorage', STORAGE_UPSCALER);
-    storageRemove('sessionStorage', STORAGE_UPSCALER);
-    state.upscaler = null;
-    els.upscalerUrl.value = '';
-    els.upscalerPassword.value = '';
-    els.upscalerRemember.checked = false;
-    renderUpscaler();
-    setSelecting(false);
-    setUpscalerStatus('Upscaler removed from this browser.');
-  });
-}
-
 /* ---------- preferences (non-sensitive, per device) ---------- */
 
 function savePrefs() {
-  const { modelId, aspect, resolution, size, customSize, background, quality, moderation, provider, webSearch, count, upscale } = state;
-  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, customSize, background, quality, moderation, provider, webSearch, count, upscale }));
+  const { modelId, aspect, resolution, size, customSize, background, quality, moderation, provider, webSearch, count } = state;
+  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, customSize, background, quality, moderation, provider, webSearch, count }));
 }
 
 function loadPrefs() {
@@ -489,10 +351,6 @@ function loadPrefs() {
   if (COUNTS.includes(prefs.count)) state.count = prefs.count;
   const pair = (value) => value && Number.isInteger(value.w) && Number.isInteger(value.h) && value.w > 0 && value.h > 0;
   if (pair(prefs.customSize)) state.customSize = { w: prefs.customSize.w, h: prefs.customSize.h };
-  const up = prefs.upscale;
-  if (up && known(UPSCALE_STYLES, up.style) && known(UPSCALE_SCALES, up.x2) && known(UPSCALE_NOISE, up.noise)) {
-    state.upscale = { style: up.style, x2: up.x2, noise: up.noise };
-  }
 }
 
 /* ---------- form controls ---------- */
@@ -1158,7 +1016,7 @@ function describeError(err, job, timedOut) {
   if (timedOut) {
     return {
       title: 'Timed out',
-      body: `No answer after ${timeoutFor(job) / 60000} minutes. The model may be overloaded. Try again or pick another model.`,
+      body: `No answer after ${REQUEST_TIMEOUT_MS / 60000} minutes. The model may be overloaded. Try again or pick another model.`,
     };
   }
   if (err && err.name === 'AbortError') return { title: 'Cancelled', body: 'You stopped this one.' };
@@ -1173,8 +1031,6 @@ function describeError(err, job, timedOut) {
         return { title: "Couldn't read the image", body: "The API sent image data this browser can't decode." };
       case 'encode':
         return { title: "Couldn't make a PNG", body: 'The image is too large for this browser to convert. Try a lower resolution.' };
-      case 'upscale':
-        return { title: 'Upscale failed', body: err.detail, openKey: err.openKey, url: err.url };
       case 'link-only':
         return {
           title: "Couldn't convert to PNG",
@@ -1237,7 +1093,6 @@ function formatElapsed(ms) {
 
 function guessRatio(job) {
   const p = job.params;
-  if (p.ratio) return p.ratio;
   if (p.size && p.size !== 'auto') {
     const [w, h] = p.size.split('x').map(Number);
     return w / h;
@@ -1249,17 +1104,8 @@ function guessRatio(job) {
   return 1;
 }
 
-function optionText(options, value) {
-  const match = options.find(([v]) => v === value);
-  return match ? match[1] : value;
-}
-
 function describeParams(job) {
   const p = job.params;
-  if (job.family === 'import') return ['your image', p.name].filter(Boolean).join(' · ');
-  if (job.family === 'upscale') {
-    return ['bigjpg', optionText(UPSCALE_SCALES, p.x2), optionText(UPSCALE_STYLES, p.style), optionText(UPSCALE_NOISE, p.noise)].join(' · ');
-  }
   const parts = [job.modelId];
   if (p.aspect) parts.push(p.aspect);
   if (p.resolution) parts.push(p.resolution);
@@ -1278,7 +1124,6 @@ function updateGalleryChrome() {
   const hasCards = cards.size > 0;
   els.empty.hidden = hasCards;
   els.clearGallery.hidden = !hasCards;
-  renderBatch();
 }
 
 function createCard(job) {
@@ -1297,18 +1142,12 @@ function createCard(job) {
 
   card.q('.card-prompt').textContent = job.prompt || '(no prompt)';
   card.q('.card-info').textContent = describeParams(job);
-  node.classList.toggle('is-upscale', job.family === 'upscale');
-  node.classList.toggle('is-import', job.family === 'import');
 
   card.q('.card-cancel').addEventListener('click', () => {
-    const queued = upscaleQueue.waiting.includes(card);
-    if (!card.controller && !queued) return;
-    if (!window.confirm(queued ? 'Take this image out of the upscale line?' : 'Stop generating this image?')) return;
-    if (dequeueUpscale(card)) showFailure(card, { title: 'Cancelled', body: 'You took this one out of the line.' }, '');
-    else if (card.controller) card.controller.abort();
+    if (!card.controller) return;
+    if (window.confirm('Stop generating this image?')) card.controller.abort();
   });
-  card.q('.card-retry').addEventListener('click', () => (card.job.family === 'upscale' ? queueUpscale(card) : runCard(card)));
-  card.q('.card-pick-box').addEventListener('change', renderBatch);
+  card.q('.card-retry').addEventListener('click', () => runCard(card));
   card.q('.card-dismiss').addEventListener('click', () => {
     if (confirmCardRemoval(card)) removeCard(card);
   });
@@ -1321,21 +1160,6 @@ function createCard(job) {
   card.q('.card-report-copy').addEventListener('click', () => copyReport(card));
   card.q('.card-ref').addEventListener('click', () => useAsReference(card));
   for (const button of node.querySelectorAll('.card-reuse')) button.addEventListener('click', () => reuseSettings(card, button));
-
-  const upscaleSelects = [
-    [card.q('.up-style'), UPSCALE_STYLES, 'style'],
-    [card.q('.up-scale'), UPSCALE_SCALES, 'x2'],
-    [card.q('.up-noise'), UPSCALE_NOISE, 'noise'],
-  ];
-  for (const [select, options, name] of upscaleSelects) {
-    fillSelect(select, options, state.upscale[name]);
-    select.addEventListener('change', () => {
-      state.upscale = { ...state.upscale, [name]: select.value };
-      savePrefs();
-      renderUpscaleNote(card);
-    });
-  }
-  card.q('.up-start').addEventListener('click', () => startUpscale(card));
 
   cards.set(card.id, card);
   els.gallery.prepend(node);
@@ -1412,22 +1236,20 @@ async function runCard(card) {
   card.timeout = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, timeoutFor(job));
+  }, REQUEST_TIMEOUT_MS);
 
-  const upscale = job.family === 'upscale';
   try {
-    if (upscale && !state.upscaler) throw new StudioError('upscale', { detail: 'Set up the bigjpg upscaler in the key panel first.', openKey: true });
-    if (!upscale && !state.apiKey) throw new StudioError('no-key');
-    const answer = upscale ? await requestUpscale(card, controller.signal) : await requestWithRetries(card, controller.signal);
-    const bytes = answer.bytes || (answer.base64 ? base64ToBytes(answer.base64) : await fetchImageBytes(answer.url, controller.signal));
-    const png = upscale ? await toPngOrKeep(bytes, job) : await toPng(bytes);
+    if (!state.apiKey) throw new StudioError('no-key');
+    const answer = await requestWithRetries(card, controller.signal);
+    const bytes = answer.base64 ? base64ToBytes(answer.base64) : await fetchImageBytes(answer.url, controller.signal);
+    const png = await toPng(bytes);
     if (!cards.has(card.id)) return;
     showResult(card, png, Date.now() - started);
   } catch (err) {
     if (!cards.has(card.id)) return;
     const info = describeError(err, job, timedOut);
     if (err instanceof ApiError && err.attempts > 1) info.body += ` Tried ${err.attempts} times.`;
-    const reportable = !upscale && !timedOut && (err instanceof ApiError || err instanceof TypeError);
+    const reportable = !timedOut && (err instanceof ApiError || err instanceof TypeError);
     showFailure(card, info, reportable ? errorReport(err, job, new Date()) : '');
   } finally {
     stopCardTimers(card);
@@ -1448,20 +1270,13 @@ function showResult(card, png, tookMs, restored = false) {
   card.node.style.setProperty('--ar', String(png.width / png.height));
 
   const stamp = new Date(card.createdAt).toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  // Results are PNG unless an upscale was too large for this browser to convert
-  const isPng = png.blob.type === 'image/png';
-  const ext = isPng ? 'png' : { webp: 'webp', gif: 'gif' }[png.format] || 'jpg';
   const download = card.q('.card-download');
   download.href = card.objectUrl;
-  download.download = `${card.job.modelId}-${stamp}.${ext}`;
-  download.textContent = `download ${ext}`;
+  // model IDs carry a provider prefix like "openai/", which can't go in a file name
+  download.download = `${card.job.modelId.replace(/\//g, '-')}-${stamp}.png`;
 
-  const converted = isPng && png.format !== 'png' ? ` · converted from ${png.format}` : '';
-  const imported = card.job.family === 'import';
-  const kept = isPng || imported ? '' : ' · kept as sent, couldn\'t convert here';
-  const took = imported ? '' : ` · ${formatElapsed(tookMs)}`;
-  card.q('.card-info').textContent = `${describeParams(card.job)} · ${png.width}×${png.height} ${ext}${converted}${kept}${took}`;
-  renderUpscaleNote(card);
+  const converted = png.format !== 'png' ? ` · converted from ${png.format}` : '';
+  card.q('.card-info').textContent = `${describeParams(card.job)} · ${png.width}×${png.height} png${converted} · ${formatElapsed(tookMs)}`;
   setCardState(card, 'done');
   if (!restored) saveResult(card);
 }
@@ -1525,7 +1340,6 @@ function removeWithUndo(card) {
   };
   tick();
   card.node.classList.add('is-removed');
-  renderBatch();
   card.undoTimer = setInterval(() => {
     left -= 1;
     if (left <= 0) removeCard(card);
@@ -1538,7 +1352,6 @@ function undoRemove(card) {
   clearInterval(card.undoTimer);
   card.undoTimer = null;
   card.node.classList.remove('is-removed');
-  renderBatch();
   card.q('.card-remove').focus();
 }
 
@@ -1592,289 +1405,6 @@ async function useAsReference(card) {
     flashButton(button, 'no room');
   } else {
     flashButton(button, 'added');
-  }
-}
-
-/* ---------- bigjpg upscaling ---------- */
-
-// An image from the device becomes a card of its own, kept exactly as it was, so it can be
-// upscaled like a generated one.
-async function importForUpscale(files) {
-  for (const file of files) {
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      window.alert(`${file.name} isn't a PNG, JPEG or WebP image, so it can't be upscaled.`);
-      continue;
-    }
-    let img;
-    try {
-      img = await loadImage(file);
-    } catch (_) {
-      window.alert(`${file.name} couldn't be opened as an image.`);
-      continue;
-    }
-    const format = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' }[file.type];
-    const card = createCard({ modelId: 'your-image', modelName: 'your image', family: 'import', prompt: '', params: { name: file.name }, refs: [] });
-    showResult(card, { blob: file, width: img.naturalWidth, height: img.naturalHeight, format }, 0);
-  }
-}
-
-function initUpscaleOwn() {
-  els.upscaleOwn.addEventListener('click', () => els.upscaleFile.click());
-  els.upscaleFile.addEventListener('change', async () => {
-    const files = Array.from(els.upscaleFile.files || []);
-    els.upscaleFile.value = '';
-    await importForUpscale(files);
-  });
-}
-
-function timeoutFor(job) {
-  return job.family === 'upscale' ? UPSCALE_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
-}
-
-function renderUpscaleNote(card) {
-  const note = card.q('.up-note');
-  if (!card.result) {
-    note.textContent = '';
-    return;
-  }
-  const factor = 2 ** Number(card.q('.up-scale').value);
-  note.textContent = `Makes ${card.result.width * factor}×${card.result.height * factor}. Uses one bigjpg API call.`;
-}
-
-function startUpscale(card, options = state.upscale) {
-  if (!card.result) return;
-  const { style, x2, noise } = options;
-  const factor = 2 ** Number(x2);
-  const { width, height, blob } = card.result;
-  queueUpscale(createCard({
-    modelId: 'bigjpg',
-    modelName: 'bigjpg',
-    family: 'upscale',
-    prompt: card.job.prompt,
-    params: { style, x2, noise, ratio: width / height, width: width * factor, height: height * factor },
-    refs: [],
-    // the image to enlarge; kept in memory for "try again" and left out of what gets saved
-    source: blob,
-  }));
-}
-
-function queueUpscale(card) {
-  setCardState(card, 'pending');
-  card.q('.elapsed').textContent = '';
-  card.q('.pending-note').textContent = 'Waiting for other upscales to finish...';
-  upscaleQueue.waiting.push(card);
-  pumpUpscales();
-}
-
-function pumpUpscales() {
-  while (upscaleQueue.running < UPSCALE_AT_ONCE && upscaleQueue.waiting.length) {
-    const card = upscaleQueue.waiting.shift();
-    if (!cards.has(card.id)) continue;
-    upscaleQueue.running += 1;
-    runCard(card).finally(() => {
-      upscaleQueue.running -= 1;
-      pumpUpscales();
-    });
-  }
-}
-
-function dequeueUpscale(card) {
-  const index = upscaleQueue.waiting.indexOf(card);
-  if (index === -1) return false;
-  upscaleQueue.waiting.splice(index, 1);
-  return true;
-}
-
-/* ---------- upscale several at once ---------- */
-
-function pickableCards() {
-  return Array.from(cards.values()).filter((card) => card.result && !card.node.classList.contains('is-removed'));
-}
-
-function pickedCards() {
-  return pickableCards().filter((card) => card.q('.card-pick-box').checked);
-}
-
-function renderBatch() {
-  for (const card of cards.values()) card.node.classList.toggle('is-picked', card.q('.card-pick-box').checked);
-  const count = pickedCards().length;
-  els.batchCount.textContent = count ? `${count} selected` : 'Tick the images to upscale.';
-  els.batchStart.textContent = count ? `upscale ${count}` : 'upscale';
-  els.batchStart.disabled = count === 0;
-}
-
-function setSelecting(on) {
-  document.body.classList.toggle('is-selecting', on);
-  els.batchBar.hidden = !on;
-  if (!on) for (const card of cards.values()) card.q('.card-pick-box').checked = false;
-  if (on) {
-    els.batchStyle.value = state.upscale.style;
-    els.batchScale.value = state.upscale.x2;
-    els.batchNoise.value = state.upscale.noise;
-  }
-  renderBatch();
-}
-
-function initBatch() {
-  const selects = [[els.batchStyle, UPSCALE_STYLES, 'style'], [els.batchScale, UPSCALE_SCALES, 'x2'], [els.batchNoise, UPSCALE_NOISE, 'noise']];
-  for (const [select, options, name] of selects) {
-    fillSelect(select, options, state.upscale[name]);
-    select.addEventListener('change', () => {
-      state.upscale = { ...state.upscale, [name]: select.value };
-      savePrefs();
-    });
-  }
-  els.upscaleSeveral.addEventListener('click', () => setSelecting(!document.body.classList.contains('is-selecting')));
-  els.batchDone.addEventListener('click', () => setSelecting(false));
-  els.batchAll.addEventListener('click', () => {
-    for (const card of pickableCards()) card.q('.card-pick-box').checked = true;
-    renderBatch();
-  });
-  els.batchStart.addEventListener('click', () => {
-    const picked = pickedCards();
-    if (!picked.length) return;
-    const options = { ...state.upscale };
-    const s = picked.length > 1 ? 's' : '';
-    const settings = `${optionText(UPSCALE_SCALES, options.x2)}, ${optionText(UPSCALE_STYLES, options.style)}, ${optionText(UPSCALE_NOISE, options.noise)}`;
-    if (!window.confirm(`Upscale ${picked.length} image${s} (${settings})? Uses ${picked.length} bigjpg API call${s}.`)) return;
-    // oldest first: they're processed in that order and the gallery ends up mirroring the originals
-    for (const card of picked) startUpscale(card, options);
-    setSelecting(false);
-  });
-}
-
-// Which part of an upscale a Worker path belongs to, so a failure says where it stopped
-function upscaleStep(path, init) {
-  if (path === '/upload') {
-    const size = init.body && init.body.size ? ` (${(init.body.size / MB).toFixed(1)} MB)` : '';
-    return `uploading the image${size}`;
-  }
-  if (path === '/task') return 'starting the enlarge';
-  if (path.startsWith('/task/')) return 'checking on the enlarge';
-  if (path.startsWith('/image')) return 'downloading the result';
-  return 'talking to it';
-}
-
-async function upscalerFetch(path, init, signal) {
-  const { url, password } = state.upscaler;
-  let response;
-  try {
-    response = await fetch(`${url}${path}`, {
-      ...init,
-      headers: { ...(init.headers || {}), 'X-Proxy-Password': password },
-      signal,
-      credentials: 'omit',
-      referrerPolicy: 'no-referrer',
-      cache: 'no-store',
-    });
-  } catch (err) {
-    if (err && err.name === 'AbortError') throw err;
-    throw new StudioError('upscale', { detail: `Couldn't reach your bigjpg Worker while ${upscaleStep(path, init)}. Check your connection and the Worker address in the key panel.` });
-  }
-  if (response.status === 401) {
-    throw new StudioError('upscale', { detail: 'The Worker says the password is wrong. Update it in the key panel.', openKey: true });
-  }
-  return response;
-}
-
-async function upscalerJson(path, init, signal) {
-  const response = await upscalerFetch(path, init, signal);
-  const data = safeJson(await response.text());
-  if (!response.ok || !data || data.error) {
-    const said = data && data.error ? data.error : `status ${response.status}`;
-    throw new StudioError('upscale', { detail: `The Worker said, while ${upscaleStep(path, init)}: ${said}` });
-  }
-  return data;
-}
-
-async function requestUpscale(card, signal) {
-  const { job } = card;
-  const p = job.params;
-  const note = card.q('.pending-note');
-  if (!job.source) throw new StudioError('upscale', { detail: 'The original image is no longer in memory. Upscale it again from its own card.' });
-
-  note.textContent = 'Uploading to bigjpg...';
-  const { fileurl } = await upscalerJson('/upload', { method: 'POST', headers: { 'Content-Type': job.source.type || 'image/png' }, body: job.source }, signal);
-
-  note.textContent = 'Starting the enlarge...';
-  const task = await upscalerJson('/task', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ style: p.style, noise: p.noise, x2: p.x2, input: fileurl }),
-  }, signal);
-  if (!task.tid) throw new StudioError('upscale', { detail: `bigjpg didn't start the enlarge (${task.status || 'no task id'}).` });
-
-  const estimate = task.minute ? `bigjpg estimates about ${task.minute} min.` : 'bigjpg is enlarging.';
-  const left = typeof task.remaining_api_calls === 'number' ? ` ${task.remaining_api_calls} API calls left.` : '';
-  note.textContent = estimate + left;
-
-  let misses = 0;
-  for (;;) {
-    await pause(UPSCALE_POLL_MS, signal);
-    let all;
-    try {
-      all = await upscalerJson(`/task/${task.tid}`, {}, signal);
-      if (misses) note.textContent = estimate + left;
-      misses = 0;
-    } catch (err) {
-      // a wrong password won't fix itself; anything else gets a few more tries
-      if (!(err instanceof StudioError) || err.openKey || ++misses >= UPSCALE_POLL_MISSES) throw err;
-      note.textContent = 'Lost touch with the Worker for a moment. Still waiting...';
-      continue;
-    }
-    const status = all[task.tid] || {};
-    if (status.status === 'success' && status.url) {
-      note.textContent = 'Downloading the result...';
-      return { bytes: await downloadUpscale(status.url, signal) };
-    }
-    // Only "process" and "success" have been seen; anything that reads as a failure stops,
-    // anything else keeps waiting until the timeout
-    if (/error|fail/i.test(status.status || '')) {
-      throw new StudioError('upscale', { detail: `bigjpg reported "${status.status}". Enlarging sometimes fails on their side; try again.` });
-    }
-  }
-}
-
-// bigjpg's file host allows cross-origin reads; the Worker's /image route is the fallback
-async function downloadUpscale(url, signal) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await upscaleBytes(url, signal);
-    } catch (err) {
-      if (!(err instanceof StudioError) || attempt >= UPSCALE_DOWNLOAD_TRIES) {
-        // the enlarge itself worked, so offer the file as a link
-        if (err instanceof StudioError && !err.url) err.url = url;
-        throw err;
-      }
-      await pause(5000, signal);
-    }
-  }
-}
-
-async function upscaleBytes(url, signal) {
-  try {
-    return await fetchImageBytes(url, signal);
-  } catch (err) {
-    if (!(err instanceof StudioError)) throw err;
-  }
-  const response = await upscalerFetch(`/image?url=${encodeURIComponent(url)}`, {}, signal);
-  if (!response.ok) throw new StudioError('upscale', { detail: "The enlarged image couldn't be downloaded.", url });
-  return new Uint8Array(await response.arrayBuffer());
-}
-
-// A large enlargement can be too big for this browser to re-encode, so keep bigjpg's file instead.
-async function toPngOrKeep(bytes, job) {
-  try {
-    return await toPng(bytes);
-  } catch (err) {
-    if (!(err instanceof StudioError)) throw err;
-    const format = sniffFormat(bytes);
-    return {
-      blob: new Blob([bytes], { type: MIME_FOR[format] || 'image/jpeg' }),
-      width: job.params.width,
-      height: job.params.height,
-      format,
-    };
   }
 }
 
@@ -2221,7 +1751,7 @@ function initGenerate() {
   });
 
   els.clearGallery.addEventListener('click', () => {
-    const pending = upscaleQueue.waiting.length > 0 || Array.from(cards.values()).some((card) => card.controller);
+    const pending = Array.from(cards.values()).some((card) => card.controller);
     const message = pending
       ? 'Clear all results? Images still generating will be cancelled, and saved images are deleted from this device.'
       : 'Clear all results? They are deleted from this device too, so download anything you want to keep first.';
@@ -2237,9 +1767,6 @@ function initGenerate() {
 loadPrefs();
 initTheme();
 initKey();
-initUpscaler();
-initUpscaleOwn();
-initBatch();
 initControls();
 initRefs();
 initViewer();
