@@ -434,8 +434,15 @@ select:hover {
   gap: var(--space-3);
 }
 
-.field-row [data-control="size"] {
+.field-row [data-control="size"],
+.field-row [data-control="provider"] {
   grid-column: 1 / -1;
+}
+
+/* a checkbox standing in a row of selects lines up with them */
+.field-row .check {
+  min-height: var(--tap);
+  margin-top: 0;
 }
 
 .field-row:not(:has(.field:not([hidden]))) {
@@ -576,6 +583,10 @@ select:hover {
   height: var(--h);
   border: 1.5px solid var(--muted);
   border-radius: 2px;
+}
+
+.aspect-option.is-auto .aspect-shape span {
+  border-style: dashed;
 }
 
 .aspect-option:hover {

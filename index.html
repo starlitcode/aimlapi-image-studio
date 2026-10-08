@@ -17,8 +17,8 @@
   <meta name="color-scheme" content="dark light">
   <title>Image Studio</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23120d1a'/%3E%3Crect x='7' y='9' width='18' height='14' rx='2' fill='none' stroke='%23a970ff' stroke-width='2.5'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=23aead257e">
-  <script src="app.js?v=f2f0a6f3a0" defer></script>
+  <link rel="stylesheet" href="styles.css?v=45adafe882">
+  <script src="app.js?v=2ba902f743" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -125,6 +125,26 @@
         <div class="field" data-control="background">
           <label class="label" for="background">background</label>
           <select id="background"></select>
+        </div>
+        <div class="field" data-control="quality">
+          <label class="label" for="quality">quality</label>
+          <select id="quality"></select>
+        </div>
+        <div class="field" data-control="moderation">
+          <label class="label" for="moderation">moderation</label>
+          <select id="moderation"></select>
+          <p class="field-note" id="moderation-note" role="status"></p>
+        </div>
+        <div class="field" data-control="provider">
+          <label class="label" for="provider">provider</label>
+          <select id="provider"></select>
+        </div>
+        <div class="field" data-control="web-search">
+          <span class="label">grounding</span>
+          <label class="check">
+            <input type="checkbox" id="web-search">
+            <span>use Google Search</span>
+          </label>
         </div>
       </div>
 

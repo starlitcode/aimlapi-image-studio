@@ -16,8 +16,9 @@ Private image generator page for [AI/ML API](https://aimlapi.com), with bigjpg u
 | GPT Image 2.5 Sunburst | `openai/gpt-image-2.5-sunburst` | `/v1/images/generations`, or `/v1/images/edits` with references |
 | GPT Image 2.5 Flare | `openai/gpt-image-2.5-flare` | `/v1/images/generations`, or `/v1/images/edits` with references |
 
-- Nano Banana 2 gets `aspect_ratio` and `resolution` (1K, 2K, 4K) as JSON. References go in `image_urls` as base64 data URIs, up to 5. It answers with a link on `cdn.aimlapi.com`, which allows cross-origin reads, and the page converts the image to PNG.
-- GPT gets `size` (auto, 1024x1024, 1536x1024, 1024x1536; AI/ML API's default is 1024x1024, so `auto` is sent explicitly), `background`, `output_format: png` and `response_format: b64_json`. With references the same fields go to the edit endpoint as multipart form data, the images as `image[]` files, up to 16.
+- Nano Banana 2 gets `aspect_ratio` (including `auto`), `resolution`, `provider` (`google` or `fal`; left out for auto, which falls back from Google to fal.ai) and `enable_web_search` as JSON. References go in `image_urls` as base64 data URIs, up to 14. It answers with a link on `cdn.aimlapi.com`, which allows cross-origin reads, and the page converts the image to PNG.
+- AI/ML API's schema lists 1K, 2K and 4K for Nano Banana 2. 512 is offered too, untested; if AI/ML API rejects it, the card shows their validation error.
+- GPT gets `size` (auto, 1024x1024, 1536x1024, 1024x1536; AI/ML API's default is 1024x1024, so `auto` is sent explicitly), `quality`, `background`, `output_format: png` and `response_format: b64_json`. `moderation: low` is sent only without references, because the edit endpoint has no such field. With references the fields go to the edit endpoint as multipart form data, the images as `image[]` files, up to 16.
 - Errors come back as `{ status, message, requestId, error: { name, message, data: { kind } } }`. A used-up balance is a 403 with kind `err_insufficent_credits`. The "details for a bug report" box on a failed card includes the request ID support asks for. Status codes are listed at [4xx](https://docs.aimlapi.com/errors-and-messages/errors-with-status-code-4xx) and [5xx](https://docs.aimlapi.com/errors-and-messages/errors-with-status-code-5xx).
 
 ## bigjpg upscaling

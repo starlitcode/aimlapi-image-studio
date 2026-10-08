@@ -34,12 +34,16 @@ const MODELS = [
   {
     id: 'google/gemini-3.1-flash-image',
     name: 'Nano Banana 2',
-    note: 'Google Gemini 3.1 Flash Image. Up to 5 reference images, resolution up to 4K.',
+    note: 'Google Gemini 3.1 Flash Image. Up to 14 reference images, resolution up to 4K.',
     family: 'gemini',
-    aspectRatios: ['1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9'],
-    resolutions: ['1K', '2K', '4K'],
+    aspectRatios: ['auto', '1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9'],
+    // AI/ML API's schema lists only 1K, 2K and 4K. 512 is Google's own smallest size and is
+    // offered in case AI/ML API passes it through; if not, the card shows their validation error.
+    resolutions: ['512', '1K', '2K', '4K'],
     defaultResolution: '1K',
-    maxRefs: 5,
+    // One of the two request shapes AI/ML API accepts caps references at 5, the other has no
+    // cap, so this follows Google's own limit
+    maxRefs: 14,
     maxRefMB: 7,
     refTypes: BASIC_REF_TYPES,
   },
@@ -72,6 +76,11 @@ const GPT_SIZES = [
 ];
 
 const GPT_BACKGROUNDS = ['auto', 'opaque', 'transparent'];
+const GPT_QUALITIES = [['low', 'low'], ['medium', 'medium'], ['high', 'high']];
+// Only the no-reference endpoint has a moderation setting
+const GPT_MODERATIONS = [['auto', 'auto'], ['low', 'low (less filtering)']];
+// Where AI/ML API sends a Nano Banana 2 request; auto falls back from Google to fal.ai
+const GEMINI_PROVIDERS = [['auto', 'auto (Google, then fal.ai)'], ['google', 'Google only'], ['fal', 'fal.ai only']];
 const COUNTS = [1, 2, 3, 4];
 
 // bigjpg's enlarge settings: the value is what its API takes, the text is what the page shows
@@ -120,6 +129,11 @@ const els = {
   resGroup: $('#res-group'),
   size: $('#size'),
   background: $('#background'),
+  quality: $('#quality'),
+  moderation: $('#moderation'),
+  moderationNote: $('#moderation-note'),
+  provider: $('#provider'),
+  webSearch: $('#web-search'),
   dropzone: $('#dropzone'),
   refInput: $('#ref-input'),
   refList: $('#ref-list'),
@@ -156,6 +170,10 @@ const state = {
   resolution: MODELS[0].defaultResolution,
   size: 'auto',
   background: 'auto',
+  quality: 'medium',
+  moderation: 'auto',
+  provider: 'auto',
+  webSearch: false,
   count: 1,
   // the last enlarge settings picked on a card; the defaults match bigjpg's own form
   upscale: { style: 'art', x2: '2', noise: '3' },
@@ -418,8 +436,8 @@ function initUpscaler() {
 /* ---------- preferences (non-sensitive, per device) ---------- */
 
 function savePrefs() {
-  const { modelId, aspect, resolution, size, background, count, upscale } = state;
-  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, background, count, upscale }));
+  const { modelId, aspect, resolution, size, background, quality, moderation, provider, webSearch, count, upscale } = state;
+  storageSet('localStorage', STORAGE_PREFS, JSON.stringify({ modelId, aspect, resolution, size, background, quality, moderation, provider, webSearch, count, upscale }));
 }
 
 function loadPrefs() {
@@ -435,9 +453,13 @@ function loadPrefs() {
   if (typeof prefs.resolution === 'string') state.resolution = prefs.resolution;
   if (GPT_SIZES.some(([value]) => value === prefs.size)) state.size = prefs.size;
   if (GPT_BACKGROUNDS.includes(prefs.background)) state.background = prefs.background;
+  const known = (list, value) => list.some(([v]) => v === value);
+  if (known(GPT_QUALITIES, prefs.quality)) state.quality = prefs.quality;
+  if (known(GPT_MODERATIONS, prefs.moderation)) state.moderation = prefs.moderation;
+  if (known(GEMINI_PROVIDERS, prefs.provider)) state.provider = prefs.provider;
+  if (typeof prefs.webSearch === 'boolean') state.webSearch = prefs.webSearch;
   if (COUNTS.includes(prefs.count)) state.count = prefs.count;
   const up = prefs.upscale;
-  const known = (list, value) => list.some(([v]) => v === value);
   if (up && known(UPSCALE_STYLES, up.style) && known(UPSCALE_SCALES, up.x2) && known(UPSCALE_NOISE, up.noise)) {
     state.upscale = { style: up.style, x2: up.x2, noise: up.noise };
   }
@@ -527,8 +549,14 @@ function renderAspects(model) {
   };
   els.aspectGrid.replaceChildren(
     ...model.aspectRatios.map((ratio) => {
-      const { w, h } = ratioParts(ratio);
-      return aspectOption(ratio, ratio, w, h, pick);
+      if (ratio !== 'auto') {
+        const { w, h } = ratioParts(ratio);
+        return aspectOption(ratio, ratio, w, h, pick);
+      }
+      // the model picks the shape, or takes it from the first reference
+      const option = aspectOption(ratio, ratio, 1, 1, pick);
+      option.classList.add('is-auto');
+      return option;
     }),
   );
 }
@@ -570,6 +598,10 @@ function renderControls() {
   showControl('resolution', Boolean(model.resolutions));
   showControl('size', isGpt);
   showControl('background', isGpt);
+  showControl('quality', isGpt);
+  showControl('moderation', isGpt);
+  showControl('provider', model.family === 'gemini');
+  showControl('web-search', model.family === 'gemini');
 
   if (model.aspectRatios) renderAspects(model);
   if (model.resolutions) {
@@ -590,6 +622,10 @@ function initControls() {
   renderModels();
   fillSelect(els.size, GPT_SIZES, state.size);
   fillSelect(els.background, GPT_BACKGROUNDS.map((b) => [b, b]), state.background);
+  fillSelect(els.quality, GPT_QUALITIES, state.quality);
+  fillSelect(els.moderation, GPT_MODERATIONS, state.moderation);
+  fillSelect(els.provider, GEMINI_PROVIDERS, state.provider);
+  els.webSearch.checked = state.webSearch;
   renderSegmented(els.countGroup, 'count', COUNTS, state.count, (value) => {
     state.count = value;
     savePrefs();
@@ -601,6 +637,22 @@ function initControls() {
   });
   els.background.addEventListener('change', () => {
     state.background = els.background.value;
+    savePrefs();
+  });
+  els.quality.addEventListener('change', () => {
+    state.quality = els.quality.value;
+    savePrefs();
+  });
+  els.moderation.addEventListener('change', () => {
+    state.moderation = els.moderation.value;
+    savePrefs();
+  });
+  els.provider.addEventListener('change', () => {
+    state.provider = els.provider.value;
+    savePrefs();
+  });
+  els.webSearch.addEventListener('change', () => {
+    state.webSearch = els.webSearch.checked;
     savePrefs();
   });
 
@@ -730,6 +782,7 @@ function renderRefs() {
     }),
   );
   setRefsError(refProblems(model));
+  els.moderationNote.textContent = state.refs.length ? 'Not sent with reference images; that endpoint has no moderation setting.' : '';
 }
 
 function initRefs() {
@@ -795,6 +848,12 @@ function snapshotJob() {
   if (model.family === 'gpt') {
     params.size = state.size;
     params.background = state.background;
+    params.quality = state.quality;
+    params.moderation = state.moderation;
+  }
+  if (model.family === 'gemini') {
+    params.provider = state.provider;
+    params.webSearch = state.webSearch;
   }
   return {
     modelId: model.id,
@@ -820,9 +879,12 @@ function buildRequest(job) {
     // base64 comes back in the response itself, so the image can be re-encoded to PNG
     // here without depending on the file host allowing cross-origin reads.
     // size is always sent because AI/ML API's default is 1024x1024, not auto.
-    const fields = { model: job.modelId, prompt, size: p.size || 'auto', output_format: 'png', response_format: 'b64_json' };
+    const fields = { model: job.modelId, prompt, size: p.size || 'auto', quality: p.quality || 'medium', output_format: 'png', response_format: 'b64_json' };
     if (p.background && p.background !== 'auto') fields.background = p.background;
-    if (!usesEditEndpoint(job)) return { url: GENERATE_URL, body: JSON.stringify(fields), json: true };
+    if (!usesEditEndpoint(job)) {
+      if (p.moderation === 'low') fields.moderation = 'low';
+      return { url: GENERATE_URL, body: JSON.stringify(fields), json: true };
+    }
     const form = new FormData();
     for (const [name, value] of Object.entries(fields)) form.append(name, value);
     job.refs.forEach((ref, i) => {
@@ -836,6 +898,8 @@ function buildRequest(job) {
   const body = { model: job.modelId, prompt };
   if (p.aspect) body.aspect_ratio = p.aspect;
   if (p.resolution) body.resolution = p.resolution;
+  if (p.provider && p.provider !== 'auto') body.provider = p.provider;
+  if (p.webSearch) body.enable_web_search = true;
   if (job.refs.length) body.image_urls = job.refs.map((ref) => `data:${ref.type};base64,${ref.base64}`);
   return { url: GENERATE_URL, body: JSON.stringify(body), json: true };
 }
@@ -1072,7 +1136,7 @@ function guessRatio(job) {
     const [w, h] = p.size.split('x').map(Number);
     return w / h;
   }
-  if (p.aspect) {
+  if (p.aspect && p.aspect !== 'auto') {
     const { w, h } = ratioParts(p.aspect);
     return w / h;
   }
@@ -1095,6 +1159,10 @@ function describeParams(job) {
   if (p.resolution) parts.push(p.resolution);
   if (p.size && p.size !== 'auto') parts.push(p.size);
   if (p.background && p.background !== 'auto') parts.push(`${p.background} bg`);
+  if (p.quality) parts.push(`${p.quality} quality`);
+  if (p.moderation === 'low' && !usesEditEndpoint(job)) parts.push('low moderation');
+  if (p.provider && p.provider !== 'auto') parts.push(`via ${p.provider}`);
+  if (p.webSearch) parts.push('web search');
   const refCount = job.refs.length || job.refCount || 0;
   if (refCount) parts.push(`${refCount} ref${refCount > 1 ? 's' : ''}`);
   return parts.join(' · ');
@@ -1895,12 +1963,22 @@ function reuseSettings(card, button) {
   if (model.family === 'gpt') {
     if (GPT_SIZES.some(([value]) => value === p.size)) state.size = p.size;
     if (GPT_BACKGROUNDS.includes(p.background)) state.background = p.background;
+    if (GPT_QUALITIES.some(([value]) => value === p.quality)) state.quality = p.quality;
+    if (GPT_MODERATIONS.some(([value]) => value === p.moderation)) state.moderation = p.moderation;
+  }
+  if (model.family === 'gemini') {
+    if (GEMINI_PROVIDERS.some(([value]) => value === p.provider)) state.provider = p.provider;
+    if (typeof p.webSearch === 'boolean') state.webSearch = p.webSearch;
   }
 
   els.prompt.value = job.prompt;
   renderModels();
   els.size.value = state.size;
   els.background.value = state.background;
+  els.quality.value = state.quality;
+  els.moderation.value = state.moderation;
+  els.provider.value = state.provider;
+  els.webSearch.checked = state.webSearch;
   renderControls();
   savePrefs();
   clearFormError();
