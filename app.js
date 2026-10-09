@@ -309,6 +309,8 @@ function initKey() {
     if (!stored) message = 'This browser blocked storage, so the key only lasts until you reload.';
     setKeyStatus(message, false);
     clearFormError();
+    // the badge now shows the key; a blocked-storage warning stays up so it gets read
+    if (stored) setKeyPanelOpen(false);
   });
 
   els.keyForget.addEventListener('click', () => {
@@ -564,9 +566,8 @@ function renderControls() {
   }
   renderNotes();
 
-  const heic = model.refTypes.includes('image/heic');
-  els.refInput.accept = heic ? `${model.refTypes.join(',')},.heic,.heif` : model.refTypes.join(',');
-  els.refsHint.textContent = `PNG, JPEG, WebP${heic ? ', HEIC' : ''}. Up to ${model.maxRefs}, ${model.maxRefMB} MB each.`;
+  els.refInput.accept = model.refTypes.join(',');
+  els.refsHint.textContent = `PNG, JPEG, WebP. Up to ${model.maxRefs}, ${model.maxRefMB} MB each.`;
   renderRefs();
 }
 
@@ -626,10 +627,7 @@ function initControls() {
 /* ---------- reference images ---------- */
 
 function fileType(file) {
-  if (file.type) return file.type.toLowerCase();
-  // Some browsers report an empty type for HEIC files.
-  const match = /\.(heic|heif)$/i.exec(file.name || '');
-  return match ? `image/${match[1].toLowerCase()}` : '';
+  return (file.type || '').toLowerCase();
 }
 
 function readAsBase64(blob) {
@@ -653,10 +651,6 @@ function refProblems(model = currentModel()) {
   const problems = [];
   if (state.refs.length > model.maxRefs) {
     problems.push(`${model.name} takes up to ${model.maxRefs} reference images. Remove ${state.refs.length - model.maxRefs}.`);
-  }
-  const unsupported = state.refs.filter((ref) => !model.refTypes.includes(ref.type));
-  if (unsupported.length) {
-    problems.push(`${model.name} can't use HEIC references. Remove ${unsupported.map((r) => r.name).join(', ')}.`);
   }
   const tooBig = state.refs.filter((ref) => ref.bytes > model.maxRefMB * MB);
   if (tooBig.length) {
@@ -723,7 +717,7 @@ function renderRefs() {
       const img = document.createElement('img');
       img.alt = ref.name;
       img.src = ref.previewUrl;
-      // HEIC previews don't decode outside Safari; show the file name instead.
+      // a file the browser can't preview shows its name instead
       img.addEventListener('error', () => {
         const fallback = document.createElement('span');
         fallback.className = 'ref-name';
@@ -913,9 +907,32 @@ async function requestImage(job, signal) {
   }
 
   const item = payload && Array.isArray(payload.data) ? payload.data[0] : null;
-  if (item && typeof item.b64_json === 'string' && item.b64_json) return { base64: item.b64_json };
-  if (item && typeof item.url === 'string' && item.url) return { url: item.url };
+  const costUsd = costOf(payload);
+  if (item && typeof item.b64_json === 'string' && item.b64_json) return { base64: item.b64_json, costUsd };
+  if (item && typeof item.url === 'string' && item.url) return { url: item.url, costUsd };
   throw new StudioError('empty');
+}
+
+// What the request cost, from meta.usage. GPT reports usd_spent; Nano Banana 2 only reports
+// credits_used. Every example in AI/ML API's docs that has both works out to 2,000,000 credits
+// per dollar (120000 credits = $0.06), so credits are converted at that rate and marked "~".
+const CREDITS_PER_USD = 2000000;
+
+function costOf(payload) {
+  const usage = payload && payload.meta && payload.meta.usage;
+  if (!usage) return null;
+  if (Number.isFinite(usage.usd_spent)) return { usd: usage.usd_spent, estimated: false };
+  if (Number.isFinite(usage.credits_used)) return { usd: usage.credits_used / CREDITS_PER_USD, estimated: true };
+  return null;
+}
+
+function formatCost(cost) {
+  if (!cost || !Number.isFinite(cost.usd)) return '';
+  if (cost.usd === 0) return '$0';
+  // three decimals show a 5-cent image as $0.05 and a 9.5-cent one as $0.095; tiny costs get four
+  let amount = cost.usd.toFixed(cost.usd < 0.01 ? 4 : 3);
+  if (cost.usd >= 0.01 && amount.endsWith('0')) amount = amount.slice(0, -1);
+  return `${cost.estimated ? '~' : ''}$${amount}`;
 }
 
 /* ---------- PNG conversion ---------- */
@@ -1244,6 +1261,7 @@ async function runCard(card) {
     const bytes = answer.base64 ? base64ToBytes(answer.base64) : await fetchImageBytes(answer.url, controller.signal);
     const png = await toPng(bytes);
     if (!cards.has(card.id)) return;
+    card.cost = answer.costUsd;
     showResult(card, png, Date.now() - started);
   } catch (err) {
     if (!cards.has(card.id)) return;
@@ -1276,7 +1294,8 @@ function showResult(card, png, tookMs, restored = false) {
   download.download = `${card.job.modelId.replace(/\//g, '-')}-${stamp}.png`;
 
   const converted = png.format !== 'png' ? ` · converted from ${png.format}` : '';
-  card.q('.card-info').textContent = `${describeParams(card.job)} · ${png.width}×${png.height} png${converted} · ${formatElapsed(tookMs)}`;
+  const cost = formatCost(card.cost);
+  card.q('.card-info').textContent = `${describeParams(card.job)} · ${png.width}×${png.height} png${converted} · ${formatElapsed(tookMs)}${cost ? ` · ${cost}` : ''}`;
   setCardState(card, 'done');
   if (!restored) saveResult(card);
 }
@@ -1500,6 +1519,7 @@ async function saveResult(card) {
     height: card.result.height,
     format: card.result.format,
     tookMs: card.tookMs,
+    cost: card.cost || null,
     job: {
       modelId: card.job.modelId,
       modelName: card.job.modelName,
@@ -1570,6 +1590,7 @@ async function restoreSaved() {
       const card = createCard({ ...record.job, params: record.job.params || {}, refs: [] });
       card.savedId = record.id;
       card.createdAt = record.createdAt;
+      card.cost = record.cost || null;
       saved.bytes.set(record.id, record.blob.size);
       showResult(card, { blob: record.blob, width: record.width, height: record.height, format: record.format }, record.tookMs || 0, true);
     });

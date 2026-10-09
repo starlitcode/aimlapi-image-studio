@@ -56,7 +56,6 @@
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-md: 1rem;
-  --text-lg: 1.125rem;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -133,14 +132,6 @@ textarea {
 
 .hint.center {
   text-align: center;
-}
-
-.tag {
-  margin-left: var(--space-1);
-  padding: 1px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  font-size: 0.6875rem;
 }
 
 /* ---------- buttons ---------- */
@@ -1294,6 +1285,12 @@ select:hover {
     max-height: calc(100dvh - var(--topbar-h) - var(--space-5) * 2);
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  /* the panel scrolls here, and sticky stops at its padding, which left a strip of the
+     form showing under the bar; pulling the bar down by that padding closes the gap */
+  .submit-bar {
+    bottom: calc(var(--space-4) * -1);
   }
 }
 

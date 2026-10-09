@@ -29,6 +29,8 @@ sha256sum app.js styles.css | cut -c1-10
 - Nano Banana 2 gets `aspect_ratio` (including `auto`), `resolution`, `provider` (`google` or `fal`; left out for auto, which falls back from Google to fal.ai) and `enable_web_search` as JSON. References go in `image_urls` as base64 data URIs, up to 14. It answers with a link on `cdn.aimlapi.com`, which allows cross-origin reads, and the page converts the image to PNG.
 - GPT gets `size`, `quality`, `background`, `output_format: png` and `response_format: b64_json`. `moderation: low` is sent only without references, because the edit endpoint has no such field. With references the fields go to the edit endpoint as multipart form data, the images as `image[]` files, up to 16. `size` is always sent because AI/ML API's default is 1024x1024, not auto.
 
+Each finished image shows what it cost, from the response's `meta.usage`. GPT reports `usd_spent` directly. Nano Banana 2 only reports `credits_used`, which the page converts at 2,000,000 credits per dollar (the rate in every example in AI/ML API's docs) and marks with `~`.
+
 ### Options AI/ML API doesn't list
 
 The pickers offer everything OpenAI and Google document for these models. AI/ML API's schema lists less, and none of the extras have been tried against it yet. Picking one shows a note under the control; if AI/ML API rejects it, the failed card shows their validation error.
