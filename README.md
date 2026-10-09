@@ -1,4 +1,4 @@
-# AI/ML API image generator
+# AI/ML API Image Studio
 
 An image generator page for [AI/ML API](https://aimlapi.com) with Nano Banana 2 and GPT Image 2.5. Plain HTML, CSS and JavaScript, no build step and no server: the page calls AI/ML API straight from the browser with your own key.
 
